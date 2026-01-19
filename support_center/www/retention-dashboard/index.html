@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retention Dashboard</title>
+    <link rel="stylesheet" href="/assets/support_center/css/retention-dashboard.css">
+</head>
+<body>
+    <div class="retention-dashboard">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-left">
+                <h1>Retention Dashboard</h1>
+                <p class="header-subtitle">Track renewals, identify at-risk clients, and discover upsell opportunities</p>
+            </div>
+            <div class="header-right">
+                <div class="header-actions">
+                    <a href="/support-dashboard" class="btn-secondary">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                        </svg>
+                        Support Dashboard
+                    </a>
+                    <button class="btn-primary" id="refresh-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                            <path d="M3 3v5h5"></path>
+                            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                            <path d="M16 21h5v-5"></path>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="dashboard-content" id="dashboard-content">
+            <!-- KPI Cards -->
+            <section class="kpi-section">
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-icon kpi-icon-customers">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                        </div>
+                        <div class="kpi-content">
+                            <span class="kpi-value" id="kpi-total-customers">-</span>
+                            <span class="kpi-label">Total Customers</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-card-warning">
+                        <div class="kpi-icon kpi-icon-risk">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                <line x1="12" y1="9" x2="12" y2="13"></line>
+                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            </svg>
+                        </div>
+                        <div class="kpi-content">
+                            <span class="kpi-value" id="kpi-at-risk">-</span>
+                            <span class="kpi-label">Clients at Risk</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-card-info">
+                        <div class="kpi-icon kpi-icon-renewal">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+                                <line x1="16" x2="16" y1="2" y2="6"></line>
+                                <line x1="8" x2="8" y1="2" y2="6"></line>
+                                <line x1="3" x2="21" y1="10" y2="10"></line>
+                            </svg>
+                        </div>
+                        <div class="kpi-content">
+                            <span class="kpi-value" id="kpi-renewal-revenue">-</span>
+                            <span class="kpi-label">Revenue Up for Renewal</span>
+                            <span class="kpi-subtext">Next 90 days</span>
+                        </div>
+                    </div>
+                    <div class="kpi-card kpi-card-success">
+                        <div class="kpi-icon kpi-icon-upsell">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="1" x2="12" y2="23"></line>
+                                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                            </svg>
+                        </div>
+                        <div class="kpi-content">
+                            <span class="kpi-value" id="kpi-upsell-potential">-</span>
+                            <span class="kpi-label">Upsell Potential</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Secondary KPIs -->
+                <div class="kpi-secondary">
+                    <div class="kpi-stat">
+                        <span class="kpi-stat-value" id="kpi-renewal-rate">-</span>
+                        <span class="kpi-stat-label">Renewal Rate</span>
+                    </div>
+                    <div class="kpi-stat">
+                        <span class="kpi-stat-value" id="kpi-avg-ltv">-</span>
+                        <span class="kpi-stat-label">Avg. Customer LTV</span>
+                    </div>
+                    <div class="kpi-stat">
+                        <span class="kpi-stat-value" id="kpi-renewals-month">-</span>
+                        <span class="kpi-stat-label">Renewals This Month</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Filters and List -->
+            <section class="clients-section">
+                <div class="section-header">
+                    <h2>Client Renewal Status</h2>
+                    <div class="filter-group">
+                        <div class="filter-tabs">
+                            <button class="filter-tab active" data-filter="">All</button>
+                            <button class="filter-tab" data-filter="overdue">
+                                <span class="status-dot status-overdue"></span>
+                                Overdue
+                            </button>
+                            <button class="filter-tab" data-filter="due_soon">
+                                <span class="status-dot status-due-soon"></span>
+                                Due Soon
+                            </button>
+                            <button class="filter-tab" data-filter="active">
+                                <span class="status-dot status-active"></span>
+                                Active
+                            </button>
+                        </div>
+                        <div class="search-box">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input type="text" id="client-search" placeholder="Search clients...">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Client Table -->
+                <div class="table-container">
+                    <table class="clients-table">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Status</th>
+                                <th>Renewal Date</th>
+                                <th>Products</th>
+                                <th>Lifetime Value</th>
+                                <th>Upsell Potential</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clients-table-body">
+                            <tr>
+                                <td colspan="7" class="loading-cell">
+                                    <div class="loading-spinner"></div>
+                                    <span>Loading clients...</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Product Retention Analysis -->
+            <section class="analysis-section">
+                <div class="section-header">
+                    <h2>Product Retention Analysis</h2>
+                </div>
+                <div class="product-grid" id="product-analysis">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <span>Loading product analysis...</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Client Detail Modal -->
+        <div class="modal" id="client-detail-modal">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-title">
+                        <h2 id="modal-customer-name">Customer Details</h2>
+                        <span class="modal-subtitle" id="modal-customer-id"></span>
+                    </div>
+                    <button class="modal-close" id="modal-close">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="modal-body" id="modal-body">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <span>Loading customer details...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pass data to JavaScript -->
+    <script>
+        window.frappe = window.frappe || {};
+        window.frappe.csrf_token = "{{ csrf_token }}";
+        window.frappe.session = window.frappe.session || {};
+        window.frappe.session.user = "{{ user }}";
+        window.DASHBOARD_VIEW_MODE = "{{ view_mode }}";
+        window.DASHBOARD_CUSTOMER_ID = "{{ customer_id or '' }}";
+    </script>
+
+    <script src="/assets/support_center/js/retention-dashboard.js"></script>
+</body>
+</html>

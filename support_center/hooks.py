@@ -8,18 +8,19 @@ app_license = "mit"
 # Apps
 # ------------------
 
-# required_apps = []
+# Required Apps
+required_apps = ["frappe", "erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "support_center",
-# 		"logo": "/assets/support_center/logo.png",
-# 		"title": "Support Center",
-# 		"route": "/support_center",
-# 		"has_permission": "support_center.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "support_center",
+		"logo": "/assets/support_center/images/support-dashboard-logo.svg",
+		"title": "Support Center",
+		"route": "/support-dashboard",
+		"has_permission": "support_center.api.permissions.has_app_permission"
+	}
+]
 
 # Includes in <head>
 # ------------------
@@ -29,7 +30,7 @@ app_license = "mit"
 # app_include_js = "/assets/support_center/js/support_center.js"
 
 # include js, css files in header of web template
-# web_include_css = "/assets/support_center/css/support_center.css"
+web_include_css = "/assets/support_center/css/support-dashboard.css"
 # web_include_js = "/assets/support_center/js/support_center.js"
 
 # include custom scss in every website theme (without file extension ".scss")
@@ -69,6 +70,13 @@ app_license = "mit"
 
 # automatically create page for each record of this doctype
 # website_generators = ["Web Page"]
+
+# Website Route Rules
+# -------------------
+
+website_route_rules = [
+    {"from_route": "/support-dashboard", "to_route": "support-dashboard"},
+]
 
 # Jinja
 # ----------
