@@ -25,6 +25,10 @@ class SupportDashboard {
         this.customerListQuery = '';
         this.isLoadingPage = false;
 
+        // Category filter state
+        this.currentCategory = 'all';  // 'all', 'customer', 'contact', 'booking', 'order'
+        this.categoryCounts = {};  // Counts per category for tab badges
+
         // Pagination state - orders in detail view
         this.ordersPageSize = 10;
         this.ordersLoaded = 0;
@@ -37,6 +41,8 @@ class SupportDashboard {
 
         this.initializeEventListeners();
         this.setupKeyboardShortcuts();
+        this.initializeCategoryTabs();
+        this.initializeFromURL();
 
         // Check if we should load a specific record (from URL query param)
         if (window.DASHBOARD_VIEW_MODE === 'detail' && window.DASHBOARD_RECORD_ID) {
@@ -44,7 +50,145 @@ class SupportDashboard {
             this.loadRecordDetail(window.DASHBOARD_RECORD_ID, recordType);
         } else {
             this.loadCustomerList();
+            this.loadCategoryCounts();
         }
+    }
+
+    /**
+     * Initialize category filter state from URL parameters
+     */
+    initializeFromURL() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const category = urlParams.get('category');
+        const search = urlParams.get('q');
+
+        if (category && ['all', 'contact', 'customer', 'booking'].includes(category)) {
+            this.currentCategory = category;
+            this.updateCategoryTabUI(category);
+        }
+
+        if (search) {
+            this.customerListQuery = search;
+            this.searchInput.value = search;
+        }
+    }
+
+    /**
+     * Update URL with current filter state (without page reload)
+     */
+    updateURL() {
+        const url = new URL(window.location);
+
+        if (this.currentCategory && this.currentCategory !== 'all') {
+            url.searchParams.set('category', this.currentCategory);
+        } else {
+            url.searchParams.delete('category');
+        }
+
+        if (this.customerListQuery) {
+            url.searchParams.set('q', this.customerListQuery);
+        } else {
+            url.searchParams.delete('q');
+        }
+
+        window.history.replaceState({}, '', url);
+    }
+
+    /**
+     * Initialize category tab click listeners
+     */
+    initializeCategoryTabs() {
+        const tabs = document.querySelectorAll('.category-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const category = tab.dataset.category;
+                this.setCategory(category);
+            });
+        });
+    }
+
+    /**
+     * Set the active category and reload data
+     */
+    setCategory(category) {
+        if (this.currentCategory === category) return;
+
+        this.currentCategory = category;
+        this.customerListPage = 1;  // Reset to first page
+        this.updateCategoryTabUI(category);
+        this.updateURL();
+        this.updateResultsHeader();
+
+        if (this.customerListQuery) {
+            this.filterCustomerList(this.customerListQuery);
+        } else {
+            this.loadCustomerList();
+        }
+    }
+
+    /**
+     * Update category tab UI to show active state
+     */
+    updateCategoryTabUI(activeCategory) {
+        const tabs = document.querySelectorAll('.category-tab');
+        tabs.forEach(tab => {
+            const isActive = tab.dataset.category === activeCategory;
+            tab.classList.toggle('active', isActive);
+            tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
+    }
+
+    /**
+     * Update results header based on current category
+     */
+    updateResultsHeader() {
+        const titleEl = document.getElementById('results-title');
+        if (!titleEl) return;
+
+        const categoryLabels = {
+            'all': 'All Records',
+            'contact': 'Customers',       // Contact doctype = "Customers" tab
+            'customer': 'Sales Orders',   // Customer doctype = "Sales Orders" tab
+            'booking': 'Meeting Bookings' // MM Meeting Booking = "Meeting Bookings" tab
+        };
+
+        titleEl.textContent = categoryLabels[this.currentCategory] || 'All Records';
+    }
+
+    /**
+     * Load counts for each category to display in tab badges
+     */
+    async loadCategoryCounts() {
+        try {
+            const response = await this.apiCall('support_center.api.customer_lookup.get_category_counts', {
+                query: this.customerListQuery || ''
+            });
+
+            this.categoryCounts = response || {};
+            this.updateCategoryCountBadges();
+        } catch (error) {
+            console.error('Failed to load category counts:', error);
+        }
+    }
+
+    /**
+     * Update the count badges on category tabs
+     */
+    updateCategoryCountBadges() {
+        const countElements = document.querySelectorAll('.tab-count');
+        let totalCount = 0;
+
+        countElements.forEach(el => {
+            const category = el.dataset.count;
+            if (category === 'all') {
+                // Calculate total from all categories
+                totalCount = Object.values(this.categoryCounts).reduce((sum, count) => sum + count, 0);
+                el.textContent = totalCount > 0 ? totalCount : '-';
+            } else {
+                const count = this.categoryCounts[category] || 0;
+                el.textContent = count > 0 ? count : '-';
+            }
+        });
     }
 
     initializeEventListeners() {
@@ -61,7 +205,9 @@ class SupportDashboard {
                 if (this.showingCustomerList) {
                     this.customerListPage = 1;
                     this.customerListQuery = '';
+                    this.updateURL();
                     this.loadCustomerList();
+                    this.loadCategoryCounts();
                 }
                 return;
             }
@@ -396,13 +542,16 @@ class SupportDashboard {
         // Clear search query when loading full list
         this.customerListQuery = '';
 
+        // Update results header based on category
+        this.updateResultsHeader();
+
         // Show loading state
         tbody.innerHTML = `
             <tr class="loading-row">
                 <td colspan="5">
                     <div class="table-loading">
                         <div class="loading-spinner-small"></div>
-                        <span>Loading customers...</span>
+                        <span>Loading ${this.currentCategory === 'all' ? 'records' : this.getCategoryLabel(this.currentCategory).toLowerCase()}...</span>
                     </div>
                 </td>
             </tr>
@@ -414,32 +563,34 @@ class SupportDashboard {
             // Calculate offset for pagination (1-indexed page)
             const offset = (this.customerListPage - 1) * this.customerListPageSize;
 
-            // Fetch customers with pagination and total count
-            const response = await this.apiCall('support_center.api.customer_lookup.search_customers_paginated', {
+            // Build API params with category filter
+            const apiParams = {
                 query: '',  // Empty query to get all
                 limit: this.customerListPageSize,
                 offset: offset
-            });
+            };
+
+            // Add category filter if not 'all'
+            if (this.currentCategory && this.currentCategory !== 'all') {
+                apiParams.category = this.currentCategory;
+            }
+
+            // Fetch customers with pagination and total count
+            const response = await this.apiCall('support_center.api.customer_lookup.search_customers_paginated', apiParams);
 
             // Update pagination state
             this.customerListTotalCount = response.total_count;
             this.customerListTotalPages = Math.ceil(response.total_count / this.customerListPageSize);
 
+            // Update results count display
+            this.updateResultsCount(response.total_count);
+
             if (response.results.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="5" style="text-align: center; padding: 40px; color: var(--gray-600);">
-                            No customers found. <a href="/app/customer/new">Create your first customer</a>
-                        </td>
-                    </tr>
-                `;
-                // Remove pagination if no results
-                const existingPagination = tableContainer.querySelector('.pagination-container');
-                if (existingPagination) existingPagination.remove();
+                this.renderEmptyState(tbody, tableContainer);
                 return;
             }
 
-            // Render customer rows
+            // Render customer rows (no grouping - category filter handles this)
             this.renderCustomerListRows(response.results, tbody);
 
             // Render pagination
@@ -457,6 +608,87 @@ class SupportDashboard {
         } finally {
             this.isLoadingPage = false;
         }
+    }
+
+    /**
+     * Get human-readable label for a category
+     */
+    getCategoryLabel(category) {
+        const labels = {
+            'all': 'All Records',
+            'contact': 'Customers',       // Contact doctype = "Customers" tab
+            'customer': 'Sales Orders',   // Customer doctype = "Sales Orders" tab
+            'booking': 'Meeting Bookings' // MM Meeting Booking = "Meeting Bookings" tab
+        };
+        return labels[category] || 'Records';
+    }
+
+    /**
+     * Update the results count display
+     */
+    updateResultsCount(count) {
+        const countEl = document.getElementById('results-count');
+        if (countEl) {
+            countEl.textContent = count > 0 ? `${count} record${count !== 1 ? 's' : ''}` : '';
+        }
+    }
+
+    /**
+     * Render empty state when no results
+     */
+    renderEmptyState(tbody, tableContainer) {
+        const categoryLabel = this.getCategoryLabel(this.currentCategory).toLowerCase();
+        const isFiltered = this.currentCategory !== 'all';
+        const hasSearch = !!this.customerListQuery;
+
+        let emptyMessage = '';
+        if (hasSearch && isFiltered) {
+            emptyMessage = `No ${categoryLabel} found matching "${this.escapeHtml(this.customerListQuery)}".`;
+        } else if (hasSearch) {
+            emptyMessage = `No results found matching "${this.escapeHtml(this.customerListQuery)}".`;
+        } else if (isFiltered) {
+            emptyMessage = `No ${categoryLabel} found.`;
+        } else {
+            emptyMessage = 'No records found.';
+        }
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">${this.getEmptyStateIcon()}</div>
+                        <p class="empty-state-message">${emptyMessage}</p>
+                        ${hasSearch || isFiltered ? `
+                            <div class="empty-state-actions">
+                                ${hasSearch ? `<button class="empty-state-btn" onclick="document.getElementById('customer-search').value=''; dashboard.customerListQuery = ''; dashboard.customerListPage = 1; dashboard.loadCustomerList(); dashboard.loadCategoryCounts();">Clear search</button>` : ''}
+                                ${isFiltered ? `<button class="empty-state-btn" onclick="dashboard.setCategory('all');">Show all records</button>` : ''}
+                            </div>
+                        ` : `
+                            <a href="/app/customer/new" class="empty-state-btn primary">Create your first customer</a>
+                        `}
+                    </div>
+                </td>
+            </tr>
+        `;
+
+        // Remove pagination if no results
+        const existingPagination = tableContainer.querySelector('.pagination-container');
+        if (existingPagination) existingPagination.remove();
+
+        this.updateResultsCount(0);
+    }
+
+    /**
+     * Get appropriate icon for empty state based on category
+     */
+    getEmptyStateIcon() {
+        const icons = {
+            'all': '📋',
+            'contact': '👤',   // Customers tab
+            'customer': '📦',  // Sales Orders tab
+            'booking': '📅'    // Meeting Bookings tab
+        };
+        return icons[this.currentCategory] || '📋';
     }
 
     /**
@@ -650,13 +882,22 @@ class SupportDashboard {
             this.customerListQuery = query;
         }
 
+        // Update URL with search query
+        this.updateURL();
+
+        // Update results header
+        this.updateResultsHeader();
+
         // Show loading state
+        const searchingIn = this.currentCategory === 'all'
+            ? 'all records'
+            : this.getCategoryLabel(this.currentCategory).toLowerCase();
         tbody.innerHTML = `
             <tr class="loading-row">
                 <td colspan="5">
                     <div class="table-loading">
                         <div class="loading-spinner-small"></div>
-                        <span>Searching across all apps...</span>
+                        <span>Searching ${searchingIn}...</span>
                     </div>
                 </td>
             </tr>
@@ -668,89 +909,38 @@ class SupportDashboard {
             // Calculate offset for pagination (1-indexed page)
             const offset = (this.customerListPage - 1) * this.customerListPageSize;
 
-            // Fetch filtered customers with pagination and total count
-            const response = await this.apiCall('support_center.api.customer_lookup.search_customers_paginated', {
+            // Build API params with category filter
+            const apiParams = {
                 query: query,
                 limit: this.customerListPageSize,
                 offset: offset
-            });
+            };
+
+            // Add category filter if not 'all'
+            if (this.currentCategory && this.currentCategory !== 'all') {
+                apiParams.category = this.currentCategory;
+            }
+
+            // Fetch filtered customers with pagination and total count
+            const response = await this.apiCall('support_center.api.customer_lookup.search_customers_paginated', apiParams);
 
             // Update pagination state
             this.customerListTotalCount = response.total_count;
             this.customerListTotalPages = Math.ceil(response.total_count / this.customerListPageSize);
 
+            // Update results count display
+            this.updateResultsCount(response.total_count);
+
+            // Refresh category counts for current search query
+            this.loadCategoryCounts();
+
             if (response.results.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="5" style="text-align: center; padding: 40px; color: var(--gray-600);">
-                            No results found matching "${this.escapeHtml(query)}". <a href="#" onclick="document.getElementById('customer-search').value=''; dashboard.customerListPage = 1; dashboard.loadCustomerList(); return false;">Clear search</a>
-                        </td>
-                    </tr>
-                `;
-                // Remove pagination if no results
-                const existingPagination = tableContainer.querySelector('.pagination-container');
-                if (existingPagination) existingPagination.remove();
+                this.renderEmptyState(tbody, tableContainer);
                 return;
             }
 
-            // Group results by type for better visual organization
-            const groupedResults = this.groupResultsByType(response.results);
-
-            // Render grouped results with headers
-            tbody.innerHTML = '';
-
-            Object.entries(groupedResults).forEach(([type, group]) => {
-                // Add group header row
-                const headerRow = document.createElement('tr');
-                headerRow.className = 'group-header-row';
-                headerRow.innerHTML = `
-                    <td colspan="5">
-                        <div class="group-header" style="--group-color: ${group.color}">
-                            <span class="group-icon">${group.icon}</span>
-                            <span class="group-label">${group.label}</span>
-                            <span class="group-count">${group.items.length}</span>
-                        </div>
-                    </td>
-                `;
-                tbody.appendChild(headerRow);
-
-                // Add items in this group
-                group.items.forEach(customer => {
-                    const row = document.createElement('tr');
-                    row.className = `group-item-row group-${type}`;
-
-                    // Get source badge with appropriate styling
-                    const sourceHtml = customer.source ? `<span class="source-badge source-${customer.type}">${this.escapeHtml(customer.source)}</span>` : 'N/A';
-
-                    row.innerHTML = `
-                        <td class="customer-name-cell">${this.escapeHtml(customer.name)}</td>
-                        <td class="customer-email-cell">${this.escapeHtml(customer.email || 'N/A')}</td>
-                        <td class="customer-phone-cell">${this.escapeHtml(customer.phone || 'N/A')}</td>
-                        <td class="customer-source-cell">${sourceHtml}</td>
-                        <td>
-                            <div class="table-actions">
-                                <button data-customer-id="${customer.id}" data-customer-type="${customer.type}">View</button>
-                            </div>
-                        </td>
-                    `;
-
-                    // Click row to view record details
-                    row.addEventListener('click', (e) => {
-                        if (e.target.tagName !== 'BUTTON') {
-                            this.loadRecord(customer.id, customer.type);
-                        }
-                    });
-
-                    // Click button to view record details
-                    const btn = row.querySelector('button');
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.loadRecord(customer.id, customer.type);
-                    });
-
-                    tbody.appendChild(row);
-                });
-            });
+            // Render results (no grouping - category tabs handle filtering)
+            this.renderCustomerListRows(response.results, tbody);
 
             // Render pagination
             this.renderPagination(tableContainer);
@@ -930,7 +1120,7 @@ class SupportDashboard {
         const rows = orders.map(order => {
             // Format date and time
             const orderDate = this.formatDate(order.transaction_date);
-            const orderTime = order.order_time || '-';
+            const orderTime = this.formatTime(order.order_time);
 
             // Format status
             const statusClass = this.slugify(order.status || 'draft');
@@ -1076,7 +1266,7 @@ class SupportDashboard {
             row.addEventListener('click', () => {
                 const orderId = row.dataset.orderId;
                 if (orderId) {
-                    this.showOrderModal(orderId);
+                    this.showOrderDetail(orderId);
                 }
             });
         });
@@ -1706,6 +1896,19 @@ class SupportDashboard {
         });
     }
 
+    formatTime(timeString) {
+        if (!timeString) return '-';
+        // Handle MySQL TIME format (HH:MM:SS or HH:MM:SS.microseconds)
+        const parts = timeString.split(':');
+        if (parts.length >= 2) {
+            const hours = parseInt(parts[0], 10);
+            const minutes = parts[1].padStart(2, '0');
+            // Format as HH:MM in 24-hour CET format
+            return `${hours.toString().padStart(2, '0')}:${minutes}`;
+        }
+        return timeString;
+    }
+
     viewTimelineDetail(event) {
         const urlMap = {
             'order': `/app/sales-order/${event.id}`,
@@ -1745,10 +1948,10 @@ class SupportDashboard {
         try {
             // Fetch order details and user options in parallel
             const [orderData, users] = await Promise.all([
-                this.apiCall('meeting_manager.meeting_manager.api.order_management.get_order_details', {
+                this.apiCall('support_center.api.customer_lookup.get_order_details', {
                     order_id: orderId
                 }),
-                this.apiCall('meeting_manager.meeting_manager.api.order_management.get_user_options', {})
+                this.apiCall('support_center.api.customer_lookup.get_user_options', {})
             ]);
 
             this.currentOrderData = orderData;
@@ -2170,7 +2373,7 @@ class SupportDashboard {
             btnLoading.style.display = 'inline';
             saveBtn.disabled = true;
 
-            await this.apiCall('meeting_manager.meeting_manager.api.order_management.update_order_custom_fields', {
+            await this.apiCall('support_center.api.customer_lookup.update_order_custom_fields', {
                 order_id: orderId,
                 fields: JSON.stringify(fields)
             });
