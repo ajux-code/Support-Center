@@ -26,12 +26,33 @@
         <div class="dashboard-content" id="dashboard-content">
             <!-- Customer List (shown by default) -->
             <div class="customer-list-view">
-                <div class="list-header">
-                    <h2>Recent Customers</h2>
+                <!-- Filter Toolbar - Inline Layout -->
+                <div class="filter-toolbar">
+                    <!-- Source Filter Tabs -->
+                    <div class="category-tabs" role="tablist" aria-label="Filter by source">
+                        <button class="category-tab active" data-category="all" role="tab" aria-selected="true">
+                            <span class="tab-label">All</span>
+                            <span class="tab-count" data-count="all">-</span>
+                        </button>
+                        <button class="category-tab" data-category="contact" role="tab" aria-selected="false">
+                            <span class="tab-label">Customers</span>
+                            <span class="tab-count" data-count="contact">-</span>
+                        </button>
+                        <button class="category-tab" data-category="customer" role="tab" aria-selected="false">
+                            <span class="tab-label">Sales Orders</span>
+                            <span class="tab-count" data-count="customer">-</span>
+                        </button>
+                        <button class="category-tab" data-category="booking" role="tab" aria-selected="false">
+                            <span class="tab-label">Bookings</span>
+                            <span class="tab-count" data-count="booking">-</span>
+                        </button>
+                    </div>
+
+                    <!-- Search Input -->
                     <div class="search-container">
                         <div class="search-input-wrapper">
                             <div class="search-icon">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <path d="m21 21-4.35-4.35"></path>
                                 </svg>
@@ -39,14 +60,15 @@
                             <input
                                 type="text"
                                 id="customer-search"
-                                placeholder="Search by name, email, or phone..."
+                                placeholder="Search..."
                                 autocomplete="off"
                             >
-                            <div class="search-shortcut">Ctrl+K</div>
+                            <div class="search-shortcut">⌘K</div>
                         </div>
                         <div id="search-suggestions" class="suggestions-dropdown"></div>
                     </div>
                 </div>
+
                 <div class="customer-table-container">
                     <table class="customer-table" id="customer-table">
                         <thead>

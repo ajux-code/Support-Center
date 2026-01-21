@@ -378,7 +378,7 @@ def search_customers(query, limit=10, offset=0):
 
 
 @frappe.whitelist()
-def search_customers_paginated(query, limit=20, offset=0):
+def search_customers_paginated(query, limit=20, offset=0, category=None):
     """
     Paginated search with total count for shadcn-style pagination.
     Returns both results and total_count for proper pagination UI.
@@ -387,6 +387,11 @@ def search_customers_paginated(query, limit=20, offset=0):
         query: Search string (empty for all records)
         limit: Maximum number of results to return per page
         offset: Number of results to skip
+        category: Filter by source category ('contact', 'customer', 'booking', or 'all'/None)
+                  - 'contact': Customers from Contact doctype (source: "Contact")
+                  - 'customer': Sales Orders from Customer doctype (source: "ERPNext Customer")
+                  - 'booking': Meeting Bookings (source: "Meeting Manager")
+                  - 'all' or None: All records
 
     Returns:
         dict with 'results' list and 'total_count' integer
@@ -397,11 +402,45 @@ def search_customers_paginated(query, limit=20, offset=0):
     # Get all matching results (we need to count them)
     all_results = _get_all_search_results(query)
 
+    # Filter by category if specified
+    if category and category != 'all':
+        all_results = [r for r in all_results if r.get('type') == category]
+
     # Return paginated slice with total count
     return {
         "results": all_results[offset:offset + limit],
         "total_count": len(all_results)
     }
+
+
+@frappe.whitelist()
+def get_category_counts(query=''):
+    """
+    Get counts for each category based on the current search query.
+    Used to populate tab badges in the filter UI.
+
+    Args:
+        query: Optional search string to filter by
+
+    Returns:
+        dict with counts per category: {'contact': N, 'customer': N, 'booking': N}
+    """
+    # Get all results matching the query
+    all_results = _get_all_search_results(query if query else None)
+
+    # Count by type
+    counts = {
+        'contact': 0,
+        'customer': 0,
+        'booking': 0
+    }
+
+    for result in all_results:
+        result_type = result.get('type')
+        if result_type in counts:
+            counts[result_type] += 1
+
+    return counts
 
 
 def _get_all_search_results(query):
@@ -1965,3 +2004,230 @@ def search_customers_for_linking(query, limit=10):
         }
         for c in customers
     ]
+
+
+@frappe.whitelist()
+def get_order_details(order_id):
+    """
+    Get detailed information about a Sales Order for the order detail modal.
+
+    Args:
+        order_id: The Sales Order name/ID
+
+    Returns:
+        dict with order details including items, customer info, payment info
+        Structured to match the expected format in support-dashboard.js
+    """
+    if not order_id:
+        frappe.throw("Order ID is required")
+
+    # Get the sales order
+    order = frappe.get_doc("Sales Order", order_id)
+
+    # Get order items
+    items = []
+    for item in order.items:
+        item_data = {
+            "item_code": item.item_code,
+            "item_name": item.item_name,
+            "description": item.description or "",
+            "qty": item.qty,
+            "rate": item.rate,
+            "amount": item.amount,
+            "uom": item.uom,
+            "image": None
+        }
+
+        # Try to get item image
+        try:
+            item_doc = frappe.get_doc("Item", item.item_code)
+            item_data["image"] = item_doc.image
+        except Exception:
+            pass
+
+        # Calculate discount if any
+        if item.discount_percentage:
+            item_data["discount_percentage"] = item.discount_percentage
+            item_data["discount_display"] = f"-{item.discount_percentage}%"
+        elif item.discount_amount:
+            item_data["discount_amount"] = item.discount_amount
+            item_data["discount_display"] = f"-{frappe.format_value(item.discount_amount, {'fieldtype': 'Currency'})}"
+        else:
+            item_data["discount_display"] = ""
+
+        items.append(item_data)
+
+    # Get billing address info
+    billing_address_display = ""
+    if order.customer_address:
+        try:
+            addr = frappe.get_doc("Address", order.customer_address)
+            lines = [
+                addr.address_line1 or "",
+                addr.address_line2 or "",
+                f"{addr.city or ''}, {addr.state or ''} {addr.pincode or ''}".strip(", "),
+                addr.country or ""
+            ]
+            billing_address_display = "<br>".join([l for l in lines if l.strip()])
+        except Exception:
+            billing_address_display = order.customer_address
+
+    # Get shipping address info
+    shipping_address_display = ""
+    if order.shipping_address_name:
+        try:
+            addr = frappe.get_doc("Address", order.shipping_address_name)
+            lines = [
+                addr.address_line1 or "",
+                addr.address_line2 or "",
+                f"{addr.city or ''}, {addr.state or ''} {addr.pincode or ''}".strip(", "),
+                addr.country or ""
+            ]
+            shipping_address_display = "<br>".join([l for l in lines if l.strip()])
+        except Exception:
+            shipping_address_display = order.shipping_address_name
+
+    # Build response in the expected nested structure
+    return {
+        "order_id": order.name,
+        "customer": order.customer,
+        "customer_name": order.customer_name,
+        "transaction_date": str(order.transaction_date) if order.transaction_date else None,
+        "delivery_date": str(order.delivery_date) if order.delivery_date else None,
+        "status": order.status,
+        "docstatus": order.docstatus,
+        "currency": order.currency,
+
+        # Items
+        "items": items,
+        "total_qty": order.total_qty,
+
+        # Pricing (nested structure expected by JS)
+        "pricing": {
+            "subtotal": order.total or 0,
+            "net_total": order.net_total or 0,
+            "grand_total": order.grand_total or 0,
+            "total_taxes": order.total_taxes_and_charges or 0,
+            "discount_amount": order.discount_amount or 0,
+        },
+
+        # Billing info (nested structure expected by JS)
+        "billing": {
+            "address_display": billing_address_display,
+            "contact_display": order.contact_display if hasattr(order, 'contact_display') else order.contact_person,
+            "contact_person": order.contact_person,
+            "contact_email": order.contact_email,
+            "contact_phone": order.contact_phone,
+            "contact_mobile": order.contact_mobile if hasattr(order, 'contact_mobile') else None,
+        },
+
+        # Shipping info (nested structure expected by JS)
+        "shipping": {
+            "address_display": shipping_address_display,
+        },
+
+        # Payment info (nested structure expected by JS)
+        "payment": {
+            "payment_terms_template": order.payment_terms_template,
+            "advance_paid": order.advance_paid or 0,
+        },
+
+        # Custom fields (nested structure expected by JS)
+        "custom_fields": {
+            "custom_salesperson": getattr(order, "custom_salesperson", None),
+            "custom_booker": getattr(order, "custom_booker", None),
+            "custom_order_type": getattr(order, "custom_order_type", None),
+            "custom_product": getattr(order, "custom_product", None),
+            "custom_trend_micro_seats": getattr(order, "custom_trend_micro_seats", None),
+            "custom_lead": getattr(order, "custom_lead", None),
+            "custom_previous_order": getattr(order, "custom_previous_order", None),
+            "custom_company_reg_number": getattr(order, "custom_company_reg_number", None),
+            "custom_external_invoice_number": getattr(order, "custom_external_invoice_number", None),
+            "custom_bank_payment_status": getattr(order, "custom_bank_payment_status", None),
+            "custom_deferred_payment_date": str(getattr(order, "custom_deferred_payment_date", None)) if getattr(order, "custom_deferred_payment_date", None) else None,
+            "custom_vip_customer": getattr(order, "custom_vip_customer", 0),
+            "custom_complaint_case": getattr(order, "custom_complaint_case", 0),
+        },
+    }
+
+
+@frappe.whitelist()
+def get_user_options():
+    """
+    Get list of users for dropdowns in order detail modal (salesperson, booker).
+
+    Returns:
+        list of user options with id and label
+    """
+    users = frappe.get_all(
+        "User",
+        filters={
+            "enabled": 1,
+            "user_type": "System User"
+        },
+        fields=["name", "full_name"],
+        order_by="full_name asc"
+    )
+
+    return [
+        {
+            "id": u.name,
+            "label": u.full_name or u.name
+        }
+        for u in users
+    ]
+
+
+@frappe.whitelist()
+def update_order_custom_fields(order_id, fields):
+    """
+    Update custom fields on a Sales Order.
+
+    Args:
+        order_id: The Sales Order name/ID
+        fields: dict of field names and values to update
+
+    Returns:
+        dict with success status
+    """
+    import json
+
+    if not order_id:
+        frappe.throw("Order ID is required")
+
+    if isinstance(fields, str):
+        fields = json.loads(fields)
+
+    # Get the order
+    order = frappe.get_doc("Sales Order", order_id)
+
+    # Update allowed custom fields
+    allowed_fields = [
+        "custom_salesperson",
+        "custom_booker",
+        "custom_order_type",
+        "custom_product",
+        "custom_trend_micro_seats",
+        "custom_lead",
+        "custom_previous_order",
+        "custom_company_reg_number",
+        "custom_external_invoice_number",
+        "custom_bank_payment_status",
+        "custom_deferred_payment_date",
+        "custom_vip_customer",
+        "custom_complaint_case"
+    ]
+
+    for field, value in fields.items():
+        if field in allowed_fields:
+            # Handle empty strings for date fields
+            if field == "custom_deferred_payment_date" and value == "":
+                value = None
+            setattr(order, field, value)
+
+    order.save(ignore_permissions=True)
+
+    return {
+        "success": True,
+        "message": "Order updated successfully"
+    }
