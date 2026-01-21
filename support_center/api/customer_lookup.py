@@ -795,7 +795,7 @@ def get_customer_details(customer_id):
                     MAX(start_datetime) as last_meeting_date
                 FROM `tabMM Meeting Booking`
                 WHERE customer IS NULL
-                AND (customer_email = %(email)s OR customer_phone = %(phone)s)
+                AND (customer_email_at_booking = %(email)s OR customer_phone_at_booking = %(phone)s)
                 AND booking_status NOT IN ('Cancelled')
             """, {"email": customer.email_id, "phone": customer.mobile_no}, as_dict=True)[0]
             if fallback_stats.get("total_meetings", 0) > 0:
@@ -974,21 +974,22 @@ def get_support_history(customer_id, limit=10):
 
     # Get Meeting Manager bookings (if installed)
     if _meeting_manager_installed():
-        # First try using the customer link field (most reliable)
+        # Use the customer link field to find bookings
         bookings = frappe.db.sql("""
             SELECT
-                name,
-                start_datetime,
-                booking_status,
-                customer_name,
-                customer_email,
-                customer_phone,
-                customer_notes,
-                meeting_type
-            FROM `tabMM Meeting Booking`
-            WHERE customer = %(customer_id)s
-            AND booking_status NOT IN ('Cancelled')
-            ORDER BY start_datetime DESC
+                mb.name,
+                mb.start_datetime,
+                mb.booking_status,
+                mc.customer_name,
+                mb.customer_email_at_booking as customer_email,
+                mb.customer_phone_at_booking as customer_phone,
+                mb.customer_notes,
+                mb.meeting_type
+            FROM `tabMM Meeting Booking` mb
+            LEFT JOIN `tabMM Customer` mc ON mb.customer = mc.name
+            WHERE mb.customer = %(customer_id)s
+            AND mb.booking_status NOT IN ('Cancelled')
+            ORDER BY mb.start_datetime DESC
             LIMIT %(limit)s
         """, {"customer_id": customer_id, "limit": limit}, as_dict=True)
 
@@ -998,30 +999,31 @@ def get_support_history(customer_id, limit=10):
             booking_params = {"limit": limit}
 
             if customer_email:
-                booking_filters.append("customer_email = %(email)s")
+                booking_filters.append("mb.customer_email_at_booking = %(email)s")
                 booking_params["email"] = customer_email
 
             if customer_phone:
-                booking_filters.append("customer_phone = %(phone)s")
+                booking_filters.append("mb.customer_phone_at_booking = %(phone)s")
                 booking_params["phone"] = customer_phone
 
             booking_where = " OR ".join(booking_filters) if booking_filters else "1=0"
 
             bookings = frappe.db.sql(f"""
                 SELECT
-                    name,
-                    start_datetime,
-                    booking_status,
-                    customer_name,
-                    customer_email,
-                    customer_phone,
-                    customer_notes,
-                    meeting_type
-                FROM `tabMM Meeting Booking`
-                WHERE customer IS NULL
+                    mb.name,
+                    mb.start_datetime,
+                    mb.booking_status,
+                    mc.customer_name,
+                    mb.customer_email_at_booking as customer_email,
+                    mb.customer_phone_at_booking as customer_phone,
+                    mb.customer_notes,
+                    mb.meeting_type
+                FROM `tabMM Meeting Booking` mb
+                LEFT JOIN `tabMM Customer` mc ON mb.customer = mc.name
+                WHERE mb.customer IS NULL
                 AND ({booking_where})
-                AND booking_status NOT IN ('Cancelled')
-                ORDER BY start_datetime DESC
+                AND mb.booking_status NOT IN ('Cancelled')
+                ORDER BY mb.start_datetime DESC
                 LIMIT %(limit)s
             """, booking_params, as_dict=True)
 
@@ -1261,11 +1263,11 @@ def get_unified_timeline(customer_id, limit=20, offset=0):
             booking_params = {"fetch_limit": fetch_limit}
 
             if customer_email:
-                booking_filters.append("customer_email = %(email)s")
+                booking_filters.append("customer_email_at_booking = %(email)s")
                 booking_params["email"] = customer_email
 
             if customer_phone:
-                booking_filters.append("customer_phone = %(phone)s")
+                booking_filters.append("customer_phone_at_booking = %(phone)s")
                 booking_params["phone"] = customer_phone
 
             booking_where = " OR ".join(booking_filters) if booking_filters else "1=0"
@@ -1515,12 +1517,17 @@ def get_booking_details(booking_id):
     # Get other bookings by same customer
     other_bookings = []
 
+    # Safely get optional fields that may not exist in all versions
+    # Try _at_booking fields first (production), fall back to direct fields (dev)
+    customer_email = getattr(booking, 'customer_email_at_booking', None) or getattr(booking, 'customer_email', None)
+    customer_phone = getattr(booking, 'customer_phone_at_booking', None) or getattr(booking, 'customer_phone', None)
+    customer_name = getattr(booking, 'customer_name', None)
+
     # First try using the customer link field (most reliable)
-    if booking.customer:
+    if getattr(booking, 'customer', None):
         other_bookings = frappe.db.sql("""
             SELECT
                 name,
-                customer_name,
                 start_datetime,
                 booking_status,
                 meeting_type
@@ -1531,38 +1538,9 @@ def get_booking_details(booking_id):
             LIMIT %(limit)s
         """, {"customer": booking.customer, "current": booking_id, "limit": 5}, as_dict=True)
 
-    # Fall back to email/phone matching for legacy data
-    if not other_bookings and (booking.customer_email or booking.customer_phone):
-        filters = []
-        params = {"current": booking_id, "limit": 5}
-
-        if booking.customer_email:
-            filters.append("customer_email = %(email)s")
-            params["email"] = booking.customer_email
-
-        if booking.customer_phone:
-            filters.append("customer_phone = %(phone)s")
-            params["phone"] = booking.customer_phone
-
-        filter_str = " OR ".join(filters) if filters else "1=0"
-
-        other_bookings = frappe.db.sql(f"""
-            SELECT
-                name,
-                customer_name,
-                start_datetime,
-                booking_status,
-                meeting_type
-            FROM `tabMM Meeting Booking`
-            WHERE ({filter_str})
-            AND name != %(current)s
-            ORDER BY start_datetime DESC
-            LIMIT %(limit)s
-        """, params, as_dict=True)
-
-    # Get linked ERPNext customer - use the link field first, fall back to email/phone
+    # Get linked ERPNext customer - use the link field first
     linked_customer = None
-    if booking.customer:
+    if getattr(booking, 'customer', None):
         # Use the direct link
         linked_customer = frappe.db.get_value(
             "Customer",
@@ -1570,43 +1548,34 @@ def get_booking_details(booking_id):
             ["name", "customer_name"],
             as_dict=True
         )
-    elif booking.customer_email:
-        linked_customer = frappe.db.get_value(
-            "Customer",
-            {"email_id": booking.customer_email, "disabled": 0},
-            ["name", "customer_name"],
-            as_dict=True
-        )
-    if not linked_customer and booking.customer_phone:
-        linked_customer = frappe.db.get_value(
-            "Customer",
-            {"mobile_no": booking.customer_phone, "disabled": 0},
-            ["name", "customer_name"],
-            as_dict=True
-        )
 
-    # Get linked contact - use the link field first, fall back to email/phone
+    # Get linked contact - use the link field first
     linked_contact = None
-    if booking.contact:
+    if getattr(booking, 'contact', None):
         linked_contact = frappe.db.get_value(
             "Contact",
             booking.contact,
-            ["name", "first_name", "last_name"],
+            ["name", "first_name", "last_name", "email_id", "mobile_no"],
             as_dict=True
         )
         if linked_contact:
             linked_contact["full_name"] = f"{linked_contact.get('first_name', '')} {linked_contact.get('last_name', '')}".strip()
+            # Use contact info if booking doesn't have direct fields
+            if not customer_email:
+                customer_email = linked_contact.get('email_id')
+            if not customer_phone:
+                customer_phone = linked_contact.get('mobile_no')
 
     return {
         "booking_id": booking.name,
-        "customer_name": booking.customer_name,
-        "customer_email": booking.customer_email,
-        "customer_phone": booking.customer_phone,
-        "customer_notes": booking.customer_notes,
-        "booking_status": booking.booking_status,
-        "start_datetime": booking.start_datetime,
-        "end_datetime": booking.end_datetime,
-        "meeting_type": booking.meeting_type,
+        "customer_name": customer_name,
+        "customer_email": customer_email,
+        "customer_phone": customer_phone,
+        "customer_notes": getattr(booking, 'customer_notes', None),
+        "booking_status": getattr(booking, 'booking_status', None),
+        "start_datetime": getattr(booking, 'start_datetime', None),
+        "end_datetime": getattr(booking, 'end_datetime', None),
+        "meeting_type": getattr(booking, 'meeting_type', None),
         "meeting_type_data": meeting_type_data,
         "assigned_users": assigned_users,
         "creation": booking.creation,
@@ -1614,8 +1583,8 @@ def get_booking_details(booking_id):
         "other_bookings": other_bookings,
         "linked_customer": linked_customer,
         "linked_contact": linked_contact,
-        "customer_link": booking.customer,  # The direct link field value
-        "contact_link": booking.contact,    # The direct link field value
+        "customer_link": getattr(booking, 'customer', None),
+        "contact_link": getattr(booking, 'contact', None),
         "total_bookings": len(other_bookings) + 1
     }
 
@@ -1647,38 +1616,21 @@ def get_contact_details(contact_id):
         AND parenttype = 'Contact'
     """, {"contact": contact_id}, as_dict=True)
 
-    # Get meeting bookings by this contact's email or phone (if Meeting Manager installed)
+    # Get meeting bookings by this contact (if Meeting Manager installed)
     bookings = []
-    if _meeting_manager_installed() and (contact.email_id or contact.mobile_no or contact.phone):
-        filters = []
-        params = {"limit": 5}
-
-        if contact.email_id:
-            filters.append("customer_email = %(email)s")
-            params["email"] = contact.email_id
-
-        if contact.mobile_no:
-            filters.append("customer_phone = %(mobile)s")
-            params["mobile"] = contact.mobile_no
-
-        if contact.phone:
-            filters.append("customer_phone = %(phone)s")
-            params["phone"] = contact.phone
-
-        filter_str = " OR ".join(filters) if filters else "1=0"
-
-        bookings = frappe.db.sql(f"""
+    if _meeting_manager_installed():
+        # Use the contact link field to find bookings
+        bookings = frappe.db.sql("""
             SELECT
                 name,
-                customer_name,
                 start_datetime,
                 booking_status,
                 meeting_type
             FROM `tabMM Meeting Booking`
-            WHERE ({filter_str})
+            WHERE contact = %(contact)s
             ORDER BY start_datetime DESC
             LIMIT %(limit)s
-        """, params, as_dict=True)
+        """, {"contact": contact_id, "limit": 5}, as_dict=True)
 
     # Get communications for this contact
     communications = frappe.db.sql("""
@@ -1741,14 +1693,15 @@ def get_user_details(user_id):
         if user.email:
             bookings = frappe.db.sql("""
                 SELECT
-                    name,
-                    customer_name,
-                    start_datetime,
-                    booking_status,
-                    meeting_type
-                FROM `tabMM Meeting Booking`
-                WHERE customer_email = %(email)s
-                ORDER BY start_datetime DESC
+                    mb.name,
+                    mc.customer_name,
+                    mb.start_datetime,
+                    mb.booking_status,
+                    mb.meeting_type
+                FROM `tabMM Meeting Booking` mb
+                LEFT JOIN `tabMM Customer` mc ON mb.customer = mc.name
+                WHERE mb.customer_email_at_booking = %(email)s
+                ORDER BY mb.start_datetime DESC
                 LIMIT 5
             """, {"email": user.email}, as_dict=True)
 
@@ -1756,12 +1709,13 @@ def get_user_details(user_id):
         hosted_meetings = frappe.db.sql("""
             SELECT
                 mb.name,
-                mb.customer_name,
+                mc.customer_name,
                 mb.start_datetime,
                 mb.booking_status,
                 mb.meeting_type,
                 mbu.is_primary_host
             FROM `tabMM Meeting Booking` mb
+            LEFT JOIN `tabMM Customer` mc ON mb.customer = mc.name
             INNER JOIN `tabMM Meeting Booking Assigned User` mbu ON mbu.parent = mb.name
             WHERE mbu.user = %(user)s
             ORDER BY mb.start_datetime DESC
@@ -1823,34 +1777,39 @@ def create_customer_from_booking(booking_id):
     booking = frappe.get_doc("MM Meeting Booking", booking_id)
 
     # Check if booking already has a linked customer
-    if booking.customer:
+    if getattr(booking, 'customer', None):
         frappe.throw(_("This booking is already linked to a customer: {0}").format(booking.customer))
 
+    # Safely get optional fields that may not exist in all versions
+    customer_name = getattr(booking, 'customer_name', None)
+    customer_email = getattr(booking, 'customer_email_at_booking', None) or getattr(booking, 'customer_email', None)
+    customer_phone = getattr(booking, 'customer_phone_at_booking', None) or getattr(booking, 'customer_phone', None)
+
     # Validate required fields
-    if not booking.customer_name:
+    if not customer_name:
         frappe.throw(_("Booking must have a customer name to create a customer"))
 
     # Check if a customer with this email already exists
-    if booking.customer_email:
+    if customer_email:
         existing = frappe.db.get_value(
             "Customer",
-            {"email_id": booking.customer_email, "disabled": 0},
+            {"email_id": customer_email, "disabled": 0},
             "name"
         )
         if existing:
             frappe.throw(
                 _("A customer with email {0} already exists: {1}. Use 'Link to Customer' instead.").format(
-                    booking.customer_email, existing
+                    customer_email, existing
                 )
             )
 
     # Create the new customer
     customer = frappe.get_doc({
         "doctype": "Customer",
-        "customer_name": booking.customer_name,
+        "customer_name": customer_name,
         "customer_type": "Individual",  # Default to Individual, can be changed later
-        "email_id": booking.customer_email,
-        "mobile_no": booking.customer_phone,
+        "email_id": customer_email,
+        "mobile_no": customer_phone,
     })
 
     customer.insert(ignore_permissions=False)

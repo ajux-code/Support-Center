@@ -1120,7 +1120,7 @@ class SupportDashboard {
         const rows = orders.map(order => {
             // Format date and time
             const orderDate = this.formatDate(order.transaction_date);
-            const orderTime = order.order_time || '-';
+            const orderTime = this.formatTime(order.order_time);
 
             // Format status
             const statusClass = this.slugify(order.status || 'draft');
@@ -1894,6 +1894,19 @@ class SupportDashboard {
             hour: '2-digit',
             minute: '2-digit'
         });
+    }
+
+    formatTime(timeString) {
+        if (!timeString) return '-';
+        // Handle MySQL TIME format (HH:MM:SS or HH:MM:SS.microseconds)
+        const parts = timeString.split(':');
+        if (parts.length >= 2) {
+            const hours = parseInt(parts[0], 10);
+            const minutes = parts[1].padStart(2, '0');
+            // Format as HH:MM in 24-hour CET format
+            return `${hours.toString().padStart(2, '0')}:${minutes}`;
+        }
+        return timeString;
     }
 
     viewTimelineDetail(event) {
