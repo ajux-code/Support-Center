@@ -87,6 +87,22 @@ def check_user_permission(user_id, ptype="read"):
         )
 
 
+def check_ticket_permission(ticket_id, ptype="read"):
+    """
+    Check if current user has permission to access a specific support ticket (Issue).
+    Raises PermissionError if not allowed.
+
+    Args:
+        ticket_id: The Issue doctype name/ID
+        ptype: Permission type - 'read', 'write', etc.
+    """
+    if not frappe.has_permission("Issue", ptype, ticket_id):
+        frappe.throw(
+            _("You don't have permission to {0} this support ticket").format(ptype),
+            frappe.PermissionError
+        )
+
+
 def require_login():
     """
     Ensure user is logged in. Raises PermissionError if guest.

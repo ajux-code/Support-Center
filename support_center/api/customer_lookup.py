@@ -12,7 +12,8 @@ from support_center.api.permissions import (
     check_customer_permission,
     check_booking_permission,
     check_contact_permission,
-    check_user_permission
+    check_user_permission,
+    check_ticket_permission
 )
 
 
@@ -432,7 +433,8 @@ def get_category_counts(query=''):
     counts = {
         'contact': 0,
         'customer': 0,
-        'booking': 0
+        'booking': 0,
+        'ticket': 0
     }
 
     for result in all_results:
@@ -566,6 +568,37 @@ def _get_all_search_results(query):
                         "meeting_date": booking.start_datetime,
                         "modified": booking.modified
                     })
+
+        # 5. Fetch support tickets (Issue doctype)
+        # JOIN with Customer to get actual customer_name when linked
+        tickets = frappe.db.sql("""
+            SELECT
+                i.name, i.subject, i.status, i.priority, i.customer,
+                COALESCE(c.customer_name, i.customer_name) as customer_name,
+                i.raised_by, i.opening_date, i.modified
+            FROM `tabIssue` i
+            LEFT JOIN `tabCustomer` c ON i.customer = c.name
+            ORDER BY i.modified DESC
+        """, as_dict=True)
+
+        for ticket in tickets:
+            ticket_id = f"ticket-{ticket.name}"
+            if ticket_id not in seen_ids:
+                seen_ids.add(ticket_id)
+                # Use customer_name from Customer record if available, otherwise fall back to raised_by email
+                display_name = ticket.customer_name or ticket.raised_by or ticket.subject
+                results.append({
+                    "type": "ticket",
+                    "id": ticket.name,
+                    "name": display_name,
+                    "email": ticket.raised_by,
+                    "phone": None,
+                    "label": f"{ticket.name} - {ticket.subject}",
+                    "source": "Support Tickets",
+                    "status": ticket.status,
+                    "priority": ticket.priority,
+                    "modified": ticket.modified
+                })
 
         # Sort all results by modified date
         results.sort(key=lambda x: x.get('modified', ''), reverse=True)
@@ -730,6 +763,42 @@ def _get_all_search_results(query):
                 "amount": flt(order.grand_total),
                 "label": f"Order {order.order_id} - {order.customer_name} (${flt(order.grand_total):.2f})",
                 "source": "Sales Order"
+            })
+
+    # 6. Search support tickets (Issue doctype)
+    # JOIN with Customer to get actual customer_name and search by it
+    tickets = frappe.db.sql("""
+        SELECT
+            i.name, i.subject, i.status, i.priority, i.customer,
+            COALESCE(c.customer_name, i.customer_name) as customer_name,
+            i.raised_by, i.opening_date
+        FROM `tabIssue` i
+        LEFT JOIN `tabCustomer` c ON i.customer = c.name
+        WHERE
+            (i.subject LIKE %(query)s
+            OR i.name LIKE %(query)s
+            OR i.raised_by LIKE %(query)s
+            OR i.customer_name LIKE %(query)s
+            OR c.customer_name LIKE %(query)s)
+        ORDER BY i.modified DESC
+    """, {"query": query_param}, as_dict=True)
+
+    for ticket in tickets:
+        ticket_id = f"ticket-{ticket.name}"
+        if ticket_id not in seen_ids:
+            seen_ids.add(ticket_id)
+            # Use customer_name from Customer record if available, otherwise fall back to raised_by email
+            display_name = ticket.customer_name or ticket.raised_by or ticket.subject
+            results.append({
+                "type": "ticket",
+                "id": ticket.name,
+                "name": display_name,
+                "email": ticket.raised_by,
+                "phone": None,
+                "label": f"{ticket.name} - {ticket.subject}",
+                "source": "Support Tickets",
+                "status": ticket.status,
+                "priority": ticket.priority
             })
 
     return results
@@ -2190,3 +2259,149 @@ def update_order_custom_fields(order_id, fields):
         "success": True,
         "message": "Order updated successfully"
     }
+
+
+@frappe.whitelist()
+def get_ticket_details(ticket_id):
+    """
+    Get full support ticket (Issue) profile with related data.
+
+    Args:
+        ticket_id: The Issue doctype name/ID
+
+    Returns:
+        dict with ticket details, linked customer, related tickets, and comments
+    """
+    require_login()
+
+    # Check if ticket exists
+    if not frappe.db.exists("Issue", ticket_id):
+        frappe.throw(_("Support ticket not found"), frappe.DoesNotExistError)
+
+    # Check permission
+    check_ticket_permission(ticket_id, "read")
+
+    # Get ticket data
+    ticket = frappe.get_doc("Issue", ticket_id)
+
+    # Get linked customer if exists
+    linked_customer = None
+    if ticket.customer:
+        linked_customer = frappe.db.get_value(
+            "Customer",
+            ticket.customer,
+            ["name", "customer_name", "email_id", "mobile_no"],
+            as_dict=True
+        )
+
+    # Get related tickets (other tickets from same customer or raised_by email)
+    related_tickets = []
+    if ticket.customer:
+        related_tickets = frappe.db.sql("""
+            SELECT name, subject, status, priority, opening_date
+            FROM `tabIssue`
+            WHERE customer = %(customer)s
+            AND name != %(current)s
+            ORDER BY opening_date DESC
+            LIMIT 5
+        """, {"customer": ticket.customer, "current": ticket_id}, as_dict=True)
+    elif ticket.raised_by:
+        related_tickets = frappe.db.sql("""
+            SELECT name, subject, status, priority, opening_date
+            FROM `tabIssue`
+            WHERE raised_by = %(email)s
+            AND name != %(current)s
+            ORDER BY opening_date DESC
+            LIMIT 5
+        """, {"email": ticket.raised_by, "current": ticket_id}, as_dict=True)
+
+    # Get comments/activity from Communication doctype
+    comments = frappe.db.sql("""
+        SELECT
+            name,
+            communication_type,
+            subject,
+            content,
+            sender,
+            creation,
+            sent_or_received
+        FROM `tabCommunication`
+        WHERE reference_doctype = 'Issue'
+        AND reference_name = %(ticket)s
+        ORDER BY creation DESC
+        LIMIT 20
+    """, {"ticket": ticket_id}, as_dict=True)
+
+    # Format comments for display
+    formatted_comments = []
+    for comm in comments:
+        formatted_comments.append({
+            "id": comm.name,
+            "type": comm.communication_type,
+            "subject": comm.subject,
+            "content": comm.content,
+            "sender": comm.sender,
+            "date": comm.creation,
+            "direction": comm.sent_or_received
+        })
+
+    return {
+        "ticket_id": ticket.name,
+        "subject": ticket.subject,
+        "status": ticket.status,
+        "priority": ticket.priority,
+        "issue_type": ticket.issue_type,
+        "description": ticket.description,
+        "resolution_details": ticket.resolution_details,
+        "raised_by": ticket.raised_by,
+        "customer": ticket.customer,
+        "customer_name": ticket.customer_name,
+        "contact": ticket.contact,
+        "opening_date": ticket.opening_date,
+        "opening_time": ticket.opening_time,
+        "resolution_time": ticket.resolution_time,
+        "first_responded_on": ticket.first_responded_on,
+        "creation": ticket.creation,
+        "modified": ticket.modified,
+        "linked_customer": linked_customer,
+        "related_tickets": related_tickets,
+        "comments": formatted_comments,
+        "total_related": len(related_tickets)
+    }
+
+
+@frappe.whitelist()
+def get_customer_tickets(customer_id, limit=10, offset=0):
+    """
+    Get support tickets for a customer.
+
+    Args:
+        customer_id: Customer ID
+        limit: Maximum number of tickets to return
+        offset: Number of tickets to skip (for pagination)
+
+    Returns:
+        list of tickets with basic info
+    """
+    require_login()
+
+    limit = int(limit)
+    offset = int(offset)
+
+    # Check if customer exists
+    if not frappe.db.exists("Customer", customer_id):
+        frappe.throw(_("Customer not found"), frappe.DoesNotExistError)
+
+    check_customer_permission(customer_id, "read")
+
+    tickets = frappe.db.sql("""
+        SELECT
+            name, subject, status, priority, issue_type,
+            opening_date, resolution_time, raised_by
+        FROM `tabIssue`
+        WHERE customer = %(customer)s
+        ORDER BY opening_date DESC
+        LIMIT %(limit)s OFFSET %(offset)s
+    """, {"customer": customer_id, "limit": limit, "offset": offset}, as_dict=True)
+
+    return tickets

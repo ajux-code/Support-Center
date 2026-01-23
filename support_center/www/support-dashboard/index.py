@@ -44,6 +44,7 @@ def get_context(context):
     booking_id = frappe.form_dict.get("booking")
     contact_id = frappe.form_dict.get("contact")
     user_id = frappe.form_dict.get("user")
+    ticket_id = frappe.form_dict.get("ticket")
 
     if customer_id:
         # Verify customer exists
@@ -75,6 +76,13 @@ def get_context(context):
             frappe.throw(_("User not found"), frappe.DoesNotExistError)
         context.record_id = user_id
         context.record_type = "user"
+        context.view_mode = "detail"
+    elif ticket_id:
+        # Verify ticket (Issue) exists
+        if not frappe.db.exists("Issue", ticket_id):
+            frappe.throw(_("Support ticket not found"), frappe.DoesNotExistError)
+        context.record_id = ticket_id
+        context.record_type = "ticket"
         context.view_mode = "detail"
 
     # Keep backward compatibility

@@ -62,7 +62,7 @@ class SupportDashboard {
         const category = urlParams.get('category');
         const search = urlParams.get('q');
 
-        if (category && ['all', 'contact', 'customer', 'booking'].includes(category)) {
+        if (category && ['all', 'contact', 'customer', 'booking', 'ticket'].includes(category)) {
             this.currentCategory = category;
             this.updateCategoryTabUI(category);
         }
@@ -149,7 +149,8 @@ class SupportDashboard {
             'all': 'All Records',
             'contact': 'Customers',       // Contact doctype = "Customers" tab
             'customer': 'Sales Orders',   // Customer doctype = "Sales Orders" tab
-            'booking': 'Meeting Bookings' // MM Meeting Booking = "Meeting Bookings" tab
+            'booking': 'Meeting Bookings', // MM Meeting Booking = "Meeting Bookings" tab
+            'ticket': 'Support Tickets'   // Issue doctype = "Support Tickets" tab
         };
 
         titleEl.textContent = categoryLabels[this.currentCategory] || 'All Records';
@@ -340,13 +341,16 @@ class SupportDashboard {
 
     loadRecord(recordId, recordType) {
         // Navigate to dedicated record detail page using appropriate query parameter
+        console.log('loadRecord called with:', { recordId, recordType }); // Debug log
         const paramMap = {
             'customer': 'customer',
             'booking': 'booking',
             'contact': 'contact',
-            'user': 'user'
+            'user': 'user',
+            'ticket': 'ticket'
         };
         const param = paramMap[recordType] || 'customer';
+        console.log('Navigating to param:', param); // Debug log
         window.location.href = `/support-dashboard?${param}=${encodeURIComponent(recordId)}`;
     }
 
@@ -364,6 +368,9 @@ class SupportDashboard {
                 break;
             case 'user':
                 await this.loadUserDetail(recordId);
+                break;
+            case 'ticket':
+                await this.loadTicketDetail(recordId);
                 break;
             default:
                 await this.loadCustomerDetail(recordId);
@@ -534,6 +541,189 @@ class SupportDashboard {
         }
     }
 
+    async loadTicketDetail(ticketId) {
+        // Load support ticket (Issue) detail view
+        this.showingCustomerList = false;
+        this.currentRecordType = 'ticket';
+
+        // Show loading state
+        this.contentContainer.innerHTML = `
+            <div class="loading-state">
+                <div class="loading-spinner"></div>
+                <p>Loading ticket data...</p>
+            </div>
+        `;
+
+        try {
+            const ticketData = await this.apiCall('support_center.api.customer_lookup.get_ticket_details', {
+                ticket_id: ticketId
+            });
+
+            this.currentRecord = ticketData;
+            this.renderTicketDashboard(ticketData);
+
+        } catch (error) {
+            console.error('Failed to load ticket:', error);
+            this.contentContainer.innerHTML = `
+                <div class="error-state">
+                    <div class="error-icon">⚠️</div>
+                    <h2>Failed to load ticket data</h2>
+                    <p>${error.message || 'Please try again'}</p>
+                    <a href="/support-dashboard" class="btn-primary">Back to Dashboard</a>
+                </div>
+            `;
+        }
+    }
+
+    renderTicketDashboard(ticket) {
+        const template = document.getElementById('ticket-dashboard-template');
+        const content = template.content.cloneNode(true);
+
+        // Populate basic fields
+        this.setFieldValue(content, 'subject', ticket.subject || 'No subject');
+        this.setFieldValue(content, 'ticket_id', ticket.ticket_id);
+        this.setFieldValue(content, 'priority', ticket.priority || 'Not set');
+        this.setFieldValue(content, 'issue_type', ticket.issue_type || 'Not specified');
+        this.setFieldValue(content, 'raised_by', ticket.raised_by || 'Unknown');
+        this.setFieldValue(content, 'opening_date', this.formatDate(ticket.opening_date));
+
+        // Set description (may contain HTML)
+        const descriptionEl = content.querySelector('[data-field="description"]');
+        if (descriptionEl) {
+            descriptionEl.innerHTML = ticket.description || '<em>No description provided</em>';
+        }
+
+        // Status badge with color coding
+        const statusBadge = content.querySelector('[data-field="status_badge"]');
+        if (statusBadge) {
+            statusBadge.textContent = ticket.status;
+            const statusClass = ticket.status ? ticket.status.toLowerCase().replace(/\s+/g, '-') : 'open';
+            statusBadge.className = `status-badge status-${statusClass}`;
+        }
+
+        // Priority badge styling
+        const priorityEl = content.querySelector('[data-field="priority"]');
+        if (priorityEl && ticket.priority) {
+            const priorityClass = ticket.priority.toLowerCase();
+            priorityEl.classList.add(`priority-${priorityClass}`);
+        }
+
+        // Show linked customer if exists
+        if (ticket.linked_customer) {
+            const linkedCard = content.querySelector('[data-container="linked-customer-ticket"]');
+            if (linkedCard) {
+                linkedCard.style.display = 'block';
+                this.setFieldValue(content, 'linked_customer_name', ticket.linked_customer.customer_name);
+                this.setFieldValue(content, 'linked_customer_id', ticket.linked_customer.name);
+            }
+        }
+
+        // Show resolution if resolved/closed
+        if (ticket.resolution_details && ['Resolved', 'Closed'].includes(ticket.status)) {
+            const resolutionCard = content.querySelector('[data-container="resolution"]');
+            if (resolutionCard) {
+                resolutionCard.style.display = 'block';
+                const resolutionEl = content.querySelector('[data-field="resolution_details"]');
+                if (resolutionEl) {
+                    resolutionEl.innerHTML = ticket.resolution_details;
+                }
+            }
+        }
+
+        // Render comments/activity
+        this.renderTicketComments(content, ticket.comments || []);
+
+        // Render related tickets
+        this.renderRelatedTickets(content, ticket.related_tickets || []);
+
+        // Setup event listeners
+        this.setupTicketEventListeners(content, ticket);
+
+        // Clear and show
+        this.contentContainer.innerHTML = '';
+        this.contentContainer.appendChild(content);
+    }
+
+    renderTicketComments(content, comments) {
+        const container = content.querySelector('[data-container="ticket-comments"]');
+        if (!container) return;
+
+        if (!comments || comments.length === 0) {
+            container.innerHTML = '<p class="empty-message">No activity yet</p>';
+            return;
+        }
+
+        container.innerHTML = comments.map(comment => `
+            <div class="history-item">
+                <div class="history-icon">
+                    ${comment.direction === 'Received' ? '📥' : '📤'}
+                </div>
+                <div class="history-content">
+                    <div class="history-title">${this.escapeHtml(comment.subject || comment.type || 'Communication')}</div>
+                    <div class="history-meta">${this.escapeHtml(comment.sender || '')} • ${this.formatDateTime(comment.date)}</div>
+                    ${comment.content ? `<div class="history-notes">${comment.content.substring(0, 200)}${comment.content.length > 200 ? '...' : ''}</div>` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    renderRelatedTickets(content, tickets) {
+        const container = content.querySelector('[data-container="related-tickets"]');
+        if (!container) return;
+
+        if (!tickets || tickets.length === 0) {
+            container.innerHTML = '<p class="empty-message">No related tickets</p>';
+            return;
+        }
+
+        container.innerHTML = tickets.map(ticket => `
+            <div class="history-item" style="cursor: pointer;" onclick="dashboard.loadRecord('${ticket.name}', 'ticket')">
+                <div class="history-icon">🎫</div>
+                <div class="history-content">
+                    <div class="history-title">${this.escapeHtml(ticket.subject)}</div>
+                    <div class="history-meta">
+                        <span class="status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, '-')}">${ticket.status}</span>
+                        • ${this.formatDate(ticket.opening_date)}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    setupTicketEventListeners(content, ticket) {
+        // View full ticket in ERPNext
+        const viewFullBtn = content.querySelector('[data-action="view-full-ticket"]');
+        if (viewFullBtn) {
+            viewFullBtn.addEventListener('click', () => {
+                window.open(`/app/issue/${ticket.ticket_id}`, '_blank');
+            });
+        }
+
+        // View linked customer
+        const viewCustomerBtn = content.querySelector('[data-action="view-linked-customer-ticket"]');
+        if (viewCustomerBtn && ticket.linked_customer) {
+            viewCustomerBtn.addEventListener('click', () => {
+                this.loadRecord(ticket.linked_customer.name, 'customer');
+            });
+        }
+
+        // Reply to ticket
+        const replyBtn = content.querySelector('[data-action="reply-ticket"]');
+        if (replyBtn) {
+            replyBtn.addEventListener('click', () => {
+                window.open(`/app/issue/${ticket.ticket_id}`, '_blank');
+            });
+        }
+
+        // Close ticket
+        const closeBtn = content.querySelector('[data-action="close-ticket"]');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                window.open(`/app/issue/${ticket.ticket_id}`, '_blank');
+            });
+        }
+    }
+
     async loadCustomerList() {
         this.showingCustomerList = true;
         const tbody = document.getElementById('customer-table-body');
@@ -696,8 +886,10 @@ class SupportDashboard {
      */
     renderCustomerListRows(customers, tbody) {
         tbody.innerHTML = '';
+        console.log('renderCustomerListRows - customers:', customers); // Debug log
 
         customers.forEach(customer => {
+            console.log('Rendering row for:', { id: customer.id, type: customer.type, name: customer.name }); // Debug log
             const row = document.createElement('tr');
 
             // Get source badge with appropriate styling

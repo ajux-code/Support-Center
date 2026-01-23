@@ -3008,3 +3008,117 @@ hr {
     background: var(--info-soft);
     color: var(--info);
 }
+
+/* ============================================
+   Support Ticket Styles
+   ============================================ */
+
+/* Ticket avatar styling */
+.ticket-avatar {
+    background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+    color: white;
+}
+
+/* Ticket status badges */
+.status-badge.status-open {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-badge.status-replied {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.status-badge.status-on-hold {
+    background: #f3f4f6;
+    color: #4b5563;
+}
+
+.status-badge.status-resolved {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-badge.status-closed {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+/* Ticket priority badges */
+.priority-badge {
+    font-weight: 500;
+}
+
+.priority-badge.priority-low {
+    color: #059669;
+}
+
+.priority-badge.priority-medium {
+    color: #d97706;
+}
+
+.priority-badge.priority-high {
+    color: #dc2626;
+}
+
+.priority-badge.priority-urgent {
+    color: #7c3aed;
+    font-weight: 600;
+}
+
+/* Ticket description section */
+.ticket-description-section {
+    margin-top: 1rem;
+}
+
+.ticket-description-section h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.5rem;
+}
+
+.ticket-description {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.ticket-description img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Resolution card */
+.resolution-details {
+    border-left: 3px solid var(--success);
+}
+
+.resolution-content {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/* Ticket activity styling */
+.ticket-activity .history-notes {
+    display: block;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+}
+
+/* Related tickets styling */
+.related-tickets .history-item {
+    transition: background-color 0.15s ease;
+}
+
+.related-tickets .history-item:hover {
+    background-color: var(--bg-secondary);
+}

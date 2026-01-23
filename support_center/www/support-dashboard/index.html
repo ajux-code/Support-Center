@@ -46,6 +46,10 @@
                             <span class="tab-label">Bookings</span>
                             <span class="tab-count" data-count="booking">-</span>
                         </button>
+                        <button class="category-tab" data-category="ticket" role="tab" aria-selected="false">
+                            <span class="tab-label">Support Tickets</span>
+                            <span class="tab-count" data-count="ticket">-</span>
+                        </button>
                     </div>
 
                     <!-- Search Input -->
@@ -1152,6 +1156,134 @@
                         <h2>Meetings Hosted</h2>
                         <div class="bookings-list" data-container="hosted-meetings">
                             <p class="empty-message">No hosted meetings found</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Ticket Dashboard Template -->
+        <template id="ticket-dashboard-template">
+            <div class="dashboard-grid">
+                <!-- Left Column -->
+                <div class="left-column">
+                    <!-- Ticket Profile Card -->
+                    <div class="card ticket-profile">
+                        <h2>Support Ticket</h2>
+                        <div class="profile-content">
+                            <div class="profile-header">
+                                <div class="profile-avatar ticket-avatar">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M15 5v2"></path>
+                                        <path d="M15 11v2"></path>
+                                        <path d="M15 17v2"></path>
+                                        <path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"></path>
+                                    </svg>
+                                </div>
+                                <div class="profile-info">
+                                    <div class="profile-name" data-field="subject"></div>
+                                    <div class="profile-id" data-field="ticket_id"></div>
+                                    <span class="status-badge" data-field="status_badge"></span>
+                                </div>
+                            </div>
+
+                            <div class="ticket-meta">
+                                <div class="detail-row">
+                                    <span class="detail-label">Priority</span>
+                                    <span class="detail-value priority-badge" data-field="priority"></span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Type</span>
+                                    <span class="detail-value" data-field="issue_type"></span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Raised By</span>
+                                    <span class="detail-value" data-field="raised_by"></span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Opened</span>
+                                    <span class="detail-value" data-field="opening_date"></span>
+                                </div>
+                            </div>
+
+                            <hr>
+
+                            <div class="ticket-description-section">
+                                <h3>Description</h3>
+                                <div class="ticket-description" data-field="description"></div>
+                            </div>
+
+                            <div class="profile-actions">
+                                <button class="btn-secondary" data-action="view-full-ticket">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                        <polyline points="15 3 21 3 21 9"></polyline>
+                                        <line x1="10" y1="14" x2="21" y2="3"></line>
+                                    </svg>
+                                    Open in ERPNext
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Linked Customer Card -->
+                    <div class="card linked-customer" data-container="linked-customer-ticket" style="display: none;">
+                        <h2>Linked Customer</h2>
+                        <div class="linked-customer-info">
+                            <p><strong>Customer:</strong> <span data-field="linked_customer_name"></span></p>
+                            <p class="linked-customer-id"><small data-field="linked_customer_id"></small></p>
+                            <div class="linked-customer-actions">
+                                <button class="btn-primary" data-action="view-linked-customer-ticket">View Customer Profile</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions Card -->
+                    <div class="card quick-actions">
+                        <h2>Quick Actions</h2>
+                        <div class="actions-grid">
+                            <button class="action-btn" data-action="reply-ticket">
+                                <span class="action-icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path>
+                                    </svg>
+                                </span>
+                                <span class="action-label">Reply</span>
+                            </button>
+                            <button class="action-btn" data-action="close-ticket">
+                                <span class="action-icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                    </svg>
+                                </span>
+                                <span class="action-label">Close Ticket</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column -->
+                <div class="right-column">
+                    <!-- Resolution Details -->
+                    <div class="card resolution-details" data-container="resolution" style="display: none;">
+                        <h2>Resolution</h2>
+                        <div class="resolution-content" data-field="resolution_details"></div>
+                    </div>
+
+                    <!-- Activity / Comments -->
+                    <div class="card ticket-activity">
+                        <h2>Activity</h2>
+                        <div class="activity-list" data-container="ticket-comments">
+                            <p class="empty-message">No activity yet</p>
+                        </div>
+                    </div>
+
+                    <!-- Related Tickets -->
+                    <div class="card related-tickets">
+                        <h2>Related Tickets</h2>
+                        <div class="tickets-list" data-container="related-tickets">
+                            <p class="empty-message">No related tickets</p>
                         </div>
                     </div>
                 </div>
