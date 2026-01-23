@@ -16,6 +16,19 @@ class RetentionDashboard {
         this.clients = [];
         this.searchTimeout = null;
 
+        // Chart instances
+        this.renewalRateChart = null;
+        this.ordersComparisonChart = null;
+        this.revenueTrendChart = null;
+        this.chartMonths = 6;
+
+        // Calendar state
+        this.calendarYear = new Date().getFullYear();
+        this.calendarMonth = new Date().getMonth() + 1;
+
+        // Current tab
+        this.currentTab = 'overview';
+
         this.initializeEventListeners();
         this.loadDashboard();
     }
@@ -60,6 +73,96 @@ class RetentionDashboard {
                 this.searchInput?.focus();
             }
         });
+
+        // Chart period selector
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                this.chartMonths = parseInt(e.target.dataset.months) || 6;
+                this.loadTrendData();
+            });
+        });
+
+        // Calendar navigation
+        document.getElementById('prev-month')?.addEventListener('click', () => {
+            this.calendarMonth--;
+            if (this.calendarMonth < 1) {
+                this.calendarMonth = 12;
+                this.calendarYear--;
+            }
+            this.loadCalendarData();
+        });
+
+        document.getElementById('next-month')?.addEventListener('click', () => {
+            this.calendarMonth++;
+            if (this.calendarMonth > 12) {
+                this.calendarMonth = 1;
+                this.calendarYear++;
+            }
+            this.loadCalendarData();
+        });
+
+        document.getElementById('today-btn')?.addEventListener('click', () => {
+            const today = new Date();
+            this.calendarYear = today.getFullYear();
+            this.calendarMonth = today.getMonth() + 1;
+            this.loadCalendarData();
+        });
+
+        // Tab navigation
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tabName = e.currentTarget.dataset.tab;
+                this.switchTab(tabName);
+            });
+        });
+
+        // Quick action cards
+        document.querySelectorAll('.quick-action-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const targetTab = card.dataset.tabTarget;
+                if (targetTab) {
+                    this.switchTab(targetTab);
+                }
+            });
+        });
+
+        // View all clients link
+        document.querySelector('.view-all-clients-btn')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            const filter = e.target.dataset.filter;
+            this.switchTab('clients');
+            if (filter) {
+                this.currentFilter = filter;
+                document.querySelectorAll('.filter-tab').forEach(t => {
+                    t.classList.toggle('active', t.dataset.filter === filter);
+                });
+                this.filterClientsLocally('');
+            }
+        });
+    }
+
+    switchTab(tabName) {
+        this.currentTab = tabName;
+
+        // Update tab buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabName);
+        });
+
+        // Update tab panels
+        document.querySelectorAll('.tab-panel').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.panel === tabName);
+        });
+
+        // Load tab-specific data if needed
+        if (tabName === 'analytics' && !this.renewalRateChart) {
+            this.loadTrendData();
+        }
+        if (tabName === 'calendar') {
+            this.loadCalendarData();
+        }
     }
 
     async loadDashboard() {
@@ -79,10 +182,97 @@ class RetentionDashboard {
             this.renderClients(clients);
             this.renderProductAnalysis(products);
 
+            // Render at-risk clients for overview tab
+            this.renderAtRiskClients(clients);
+
+            // Load trend charts and calendar data based on current tab
+            if (this.currentTab === 'analytics') {
+                this.loadTrendData();
+            }
+            if (this.currentTab === 'calendar') {
+                this.loadCalendarData();
+            }
+
         } catch (error) {
             console.error('Failed to load dashboard:', error);
             this.showError('Failed to load dashboard data. Please refresh the page.');
         }
+    }
+
+    renderAtRiskClients(clients) {
+        const container = document.getElementById('at-risk-clients');
+        if (!container) return;
+
+        // Filter for overdue and due_soon clients (already sorted by priority from backend)
+        const atRiskClients = clients
+            .filter(c => c.renewal_status === 'overdue' || c.renewal_status === 'due_soon')
+            .slice(0, 6);
+
+        if (atRiskClients.length === 0) {
+            container.innerHTML = `
+                <div class="at-risk-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    <p>No clients need immediate attention</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = atRiskClients.map(client => {
+            const statusClass = client.renewal_status === 'overdue' ? 'overdue' : 'due-soon';
+            const statusLabel = client.renewal_status === 'overdue' ? 'Overdue' : 'Due Soon';
+            const daysText = client.days_until_renewal < 0
+                ? `${Math.abs(client.days_until_renewal)} days overdue`
+                : `${client.days_until_renewal} days left`;
+            const priorityLevel = client.priority_level || 'medium';
+            const priorityScore = client.priority_score || 0;
+
+            return `
+                <div class="at-risk-card priority-${priorityLevel}" data-customer-id="${this.escapeHtml(client.customer_id)}">
+                    <div class="at-risk-card-header">
+                        <span class="at-risk-card-name">${this.escapeHtml(client.customer_name)}</span>
+                        <span class="priority-badge priority-${priorityLevel}" title="Priority Score: ${priorityScore}/100">
+                            ${this.getPriorityLabel(priorityLevel)}
+                        </span>
+                    </div>
+                    <div class="at-risk-card-meta">
+                        <span class="at-risk-card-status ${statusClass}">${statusLabel}</span>
+                        <span class="at-risk-card-days">${daysText}</span>
+                    </div>
+                    <div class="at-risk-card-footer">
+                        <span class="at-risk-card-value">${this.formatCurrency(client.lifetime_value)}</span>
+                        <span class="at-risk-card-action">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                        </span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Add click handlers
+        container.querySelectorAll('.at-risk-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const customerId = card.dataset.customerId;
+                if (customerId) {
+                    this.showClientDetail(customerId);
+                }
+            });
+        });
+    }
+
+    getPriorityLabel(level) {
+        const labels = {
+            'critical': 'Critical',
+            'high': 'High Priority',
+            'medium': 'Medium',
+            'low': 'Low'
+        };
+        return labels[level] || 'Medium';
     }
 
     async loadClients() {
@@ -104,16 +294,69 @@ class RetentionDashboard {
     }
 
     renderKPIs(kpis) {
-        // Primary KPIs
+        const comparisons = kpis.comparisons || {};
+
+        // Primary KPIs with comparison indicators
         this.setKPIValue('kpi-total-customers', this.formatNumber(kpis.total_customers));
+        this.setKPIComparison('kpi-total-customers', comparisons.customers);
+
         this.setKPIValue('kpi-at-risk', this.formatNumber(kpis.clients_at_risk));
+        this.setKPIComparison('kpi-at-risk', comparisons.at_risk, true); // Inverted (down is good)
+
         this.setKPIValue('kpi-renewal-revenue', this.formatCurrency(kpis.revenue_up_for_renewal));
+        this.setKPIComparison('kpi-renewal-revenue', comparisons.renewal_revenue);
+
         this.setKPIValue('kpi-upsell-potential', this.formatCurrency(kpis.potential_upsell_value));
 
-        // Secondary KPIs
+        // Secondary KPIs with comparison indicators
         this.setKPIValue('kpi-renewal-rate', `${kpis.renewal_rate || 0}%`);
+        this.setKPIComparison('kpi-renewal-rate', comparisons.renewal_rate);
+
         this.setKPIValue('kpi-avg-ltv', this.formatCurrency(kpis.avg_customer_lifetime_value));
+
         this.setKPIValue('kpi-renewals-month', this.formatNumber(kpis.total_renewals_this_month));
+        this.setKPIComparison('kpi-renewals-month', comparisons.renewals_count);
+    }
+
+    setKPIComparison(kpiId, comparison, inverted = false) {
+        if (!comparison) return;
+
+        const container = document.getElementById(kpiId)?.parentElement;
+        if (!container) return;
+
+        // Remove existing comparison indicator
+        const existing = container.querySelector('.kpi-comparison');
+        if (existing) existing.remove();
+
+        let direction = comparison.direction;
+        // For inverted metrics (like at-risk), swap the sentiment
+        let sentiment = direction;
+        if (inverted) {
+            if (direction === 'up') sentiment = 'negative';
+            else if (direction === 'down') sentiment = 'positive';
+        } else {
+            if (direction === 'up') sentiment = 'positive';
+            else if (direction === 'down') sentiment = 'negative';
+        }
+
+        if (direction === 'neutral') return;
+
+        const arrowUp = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
+        const arrowDown = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
+        const changeText = comparison.raw_change !== undefined
+            ? `${comparison.raw_change > 0 ? '+' : ''}${comparison.raw_change}%`
+            : comparison.label;
+
+        const comparisonEl = document.createElement('span');
+        comparisonEl.className = `kpi-comparison kpi-comparison-${sentiment}`;
+        comparisonEl.innerHTML = `
+            ${direction === 'up' ? arrowUp : arrowDown}
+            <span class="comparison-text">${changeText}</span>
+        `;
+        comparisonEl.title = comparison.label || 'vs last month';
+
+        container.appendChild(comparisonEl);
     }
 
     setKPIValue(id, value) {
@@ -518,6 +761,483 @@ class RetentionDashboard {
 
     showError(message) {
         console.error(message);
+    }
+
+    // ==========================================
+    // Trend Charts Methods
+    // ==========================================
+
+    async loadTrendData() {
+        try {
+            const trendData = await this.apiCall('support_center.api.retention_dashboard.get_trend_data', {
+                months: this.chartMonths
+            });
+            this.renderCharts(trendData);
+        } catch (error) {
+            console.error('Failed to load trend data:', error);
+        }
+    }
+
+    renderCharts(data) {
+        if (!data || data.length === 0) return;
+
+        const labels = data.map(d => d.short_label);
+
+        // Chart.js default options
+        const defaultOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleFont: { size: 13 },
+                    bodyFont: { size: 12 },
+                    cornerRadius: 6
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#737373', font: { size: 11 } }
+                },
+                y: {
+                    grid: { color: '#f5f5f5' },
+                    ticks: { color: '#737373', font: { size: 11 } }
+                }
+            }
+        };
+
+        // Renewal Rate Line Chart
+        this.renderRenewalRateChart(labels, data, defaultOptions);
+
+        // Orders Comparison Bar Chart
+        this.renderOrdersComparisonChart(labels, data, defaultOptions);
+
+        // Revenue Trend Chart
+        this.renderRevenueTrendChart(labels, data, defaultOptions);
+    }
+
+    renderRenewalRateChart(labels, data, defaultOptions) {
+        const ctx = document.getElementById('renewal-rate-chart');
+        if (!ctx) return;
+
+        if (this.renewalRateChart) {
+            this.renewalRateChart.destroy();
+        }
+
+        this.renewalRateChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Renewal Rate',
+                    data: data.map(d => d.renewal_rate),
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointBackgroundColor: '#2563eb',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                ...defaultOptions,
+                plugins: {
+                    ...defaultOptions.plugins,
+                    tooltip: {
+                        ...defaultOptions.plugins.tooltip,
+                        callbacks: {
+                            label: (context) => `Renewal Rate: ${context.raw}%`
+                        }
+                    }
+                },
+                scales: {
+                    ...defaultOptions.scales,
+                    y: {
+                        ...defaultOptions.scales.y,
+                        min: 0,
+                        max: 100,
+                        ticks: {
+                            ...defaultOptions.scales.y.ticks,
+                            callback: (value) => value + '%'
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    renderOrdersComparisonChart(labels, data, defaultOptions) {
+        const ctx = document.getElementById('orders-comparison-chart');
+        if (!ctx) return;
+
+        if (this.ordersComparisonChart) {
+            this.ordersComparisonChart.destroy();
+        }
+
+        this.ordersComparisonChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Renewals',
+                        data: data.map(d => d.renewal_count),
+                        backgroundColor: '#16a34a',
+                        borderRadius: 4,
+                        barPercentage: 0.7,
+                        categoryPercentage: 0.8
+                    },
+                    {
+                        label: 'New Orders',
+                        data: data.map(d => d.new_count),
+                        backgroundColor: '#2563eb',
+                        borderRadius: 4,
+                        barPercentage: 0.7,
+                        categoryPercentage: 0.8
+                    }
+                ]
+            },
+            options: {
+                ...defaultOptions,
+                plugins: {
+                    ...defaultOptions.plugins,
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        align: 'end',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            padding: 16,
+                            font: { size: 11 }
+                        }
+                    }
+                },
+                scales: {
+                    ...defaultOptions.scales,
+                    y: {
+                        ...defaultOptions.scales.y,
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+
+    renderRevenueTrendChart(labels, data, defaultOptions) {
+        const ctx = document.getElementById('revenue-trend-chart');
+        if (!ctx) return;
+
+        if (this.revenueTrendChart) {
+            this.revenueTrendChart.destroy();
+        }
+
+        this.revenueTrendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Total Revenue',
+                        data: data.map(d => d.total_revenue),
+                        borderColor: '#171717',
+                        backgroundColor: 'rgba(23, 23, 23, 0.05)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3,
+                        pointBackgroundColor: '#171717',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    },
+                    {
+                        label: 'Renewal Revenue',
+                        data: data.map(d => d.renewal_revenue),
+                        borderColor: '#16a34a',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        fill: false,
+                        tension: 0.3,
+                        pointBackgroundColor: '#16a34a',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'New Revenue',
+                        data: data.map(d => d.new_revenue),
+                        borderColor: '#2563eb',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        fill: false,
+                        tension: 0.3,
+                        pointBackgroundColor: '#2563eb',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }
+                ]
+            },
+            options: {
+                ...defaultOptions,
+                plugins: {
+                    ...defaultOptions.plugins,
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        align: 'end',
+                        labels: {
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            padding: 16,
+                            font: { size: 11 }
+                        }
+                    },
+                    tooltip: {
+                        ...defaultOptions.plugins.tooltip,
+                        callbacks: {
+                            label: (context) => `${context.dataset.label}: ${this.formatCurrency(context.raw)}`
+                        }
+                    }
+                },
+                scales: {
+                    ...defaultOptions.scales,
+                    y: {
+                        ...defaultOptions.scales.y,
+                        beginAtZero: true,
+                        ticks: {
+                            ...defaultOptions.scales.y.ticks,
+                            callback: (value) => this.formatCurrencyCompact(value)
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ==========================================
+    // Calendar Methods
+    // ==========================================
+
+    async loadCalendarData() {
+        const calendarGrid = document.getElementById('calendar-grid');
+        const monthLabel = document.getElementById('calendar-month-label');
+
+        if (monthLabel) {
+            monthLabel.textContent = 'Loading...';
+        }
+
+        try {
+            const calendarData = await this.apiCall('support_center.api.retention_dashboard.get_calendar_view_data', {
+                year: this.calendarYear,
+                month: this.calendarMonth
+            });
+            this.renderCalendar(calendarData);
+        } catch (error) {
+            console.error('Failed to load calendar data:', error);
+            if (calendarGrid) {
+                calendarGrid.innerHTML = `
+                    <div class="calendar-error">
+                        <span>Failed to load calendar. Please try again.</span>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    renderCalendar(data) {
+        const calendarGrid = document.getElementById('calendar-grid');
+        const monthLabel = document.getElementById('calendar-month-label');
+
+        if (monthLabel) {
+            monthLabel.textContent = data.month_name;
+        }
+
+        // Update summary
+        this.setKPIValue('cal-total-renewals', this.formatNumber(data.summary.total_renewals));
+        this.setKPIValue('cal-total-value', this.formatCurrency(data.summary.total_value));
+        this.setKPIValue('cal-high-value', this.formatNumber(data.summary.high_value_count));
+
+        if (!calendarGrid) return;
+
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        const firstDay = new Date(data.first_day);
+        const daysInMonth = data.days_in_month;
+
+        // Get the day of the week for the first day (0 = Sunday, adjust for Monday start)
+        let startDay = firstDay.getDay();
+        startDay = startDay === 0 ? 6 : startDay - 1; // Convert to Monday = 0
+
+        let html = '';
+
+        // Add empty cells for days before the first of the month
+        for (let i = 0; i < startDay; i++) {
+            html += '<div class="calendar-day calendar-day-empty"></div>';
+        }
+
+        // Add days of the month
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dateStr = `${data.year}-${String(data.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const dayData = data.renewals_by_date[dateStr];
+            const isToday = dateStr === todayStr;
+            const isPast = new Date(dateStr) < new Date(todayStr);
+
+            let dayClass = 'calendar-day';
+            if (isToday) dayClass += ' calendar-day-today';
+            if (isPast) dayClass += ' calendar-day-past';
+            if (dayData && dayData.count > 0) dayClass += ' calendar-day-has-renewals';
+
+            html += `<div class="${dayClass}" data-date="${dateStr}">`;
+            html += `<span class="calendar-day-number">${day}</span>`;
+
+            if (dayData && dayData.count > 0) {
+                html += '<div class="calendar-day-renewals">';
+
+                // Show up to 3 renewals with dots
+                const renewalsToShow = dayData.renewals.slice(0, 3);
+                renewalsToShow.forEach(renewal => {
+                    const riskClass = `renewal-${renewal.risk_level}`;
+                    html += `
+                        <div class="calendar-renewal ${riskClass}"
+                             data-customer-id="${this.escapeHtml(renewal.customer_id)}"
+                             title="${this.escapeHtml(renewal.customer_name)} - ${this.formatCurrency(renewal.annual_value)}">
+                            <span class="renewal-dot"></span>
+                            <span class="renewal-name">${this.escapeHtml(this.truncate(renewal.customer_name, 12))}</span>
+                        </div>
+                    `;
+                });
+
+                // Show "+X more" if there are more renewals
+                if (dayData.count > 3) {
+                    html += `<div class="calendar-more">+${dayData.count - 3} more</div>`;
+                }
+
+                html += '</div>';
+            }
+
+            html += '</div>';
+        }
+
+        // Add empty cells to complete the last week
+        const totalCells = startDay + daysInMonth;
+        const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+        for (let i = 0; i < remainingCells; i++) {
+            html += '<div class="calendar-day calendar-day-empty"></div>';
+        }
+
+        calendarGrid.innerHTML = html;
+
+        // Add click handlers for renewals
+        calendarGrid.querySelectorAll('.calendar-renewal').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const customerId = el.dataset.customerId;
+                if (customerId) {
+                    this.showClientDetail(customerId);
+                }
+            });
+        });
+
+        // Add click handlers for days with renewals
+        calendarGrid.querySelectorAll('.calendar-day-has-renewals').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if (e.target.classList.contains('calendar-renewal') || e.target.closest('.calendar-renewal')) {
+                    return; // Don't trigger day click if clicking on a renewal
+                }
+                const dateStr = el.dataset.date;
+                this.showDayDetail(dateStr, data.renewals_by_date[dateStr]);
+            });
+        });
+    }
+
+    showDayDetail(dateStr, dayData) {
+        if (!dayData || !this.modal) return;
+
+        this.modal.classList.add('open');
+        const date = new Date(dateStr);
+        const formattedDate = date.toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+
+        document.getElementById('modal-customer-name').textContent = `Renewals on ${formattedDate}`;
+        document.getElementById('modal-customer-id').textContent = `${dayData.count} renewal${dayData.count > 1 ? 's' : ''} - ${this.formatCurrency(dayData.total_value)} total`;
+
+        const renewalsHtml = dayData.renewals.map(renewal => {
+            const riskClass = renewal.risk_level === 'high' ? 'danger' : renewal.risk_level === 'medium' ? 'warning' : 'info';
+            return `
+                <div class="renewal-list-item" data-customer-id="${this.escapeHtml(renewal.customer_id)}">
+                    <div class="renewal-item-left">
+                        <span class="renewal-item-indicator risk-${renewal.risk_level}"></span>
+                        <div class="renewal-item-info">
+                            <span class="renewal-item-name">${this.escapeHtml(renewal.customer_name)}</span>
+                            <span class="renewal-item-status">${renewal.status}</span>
+                        </div>
+                    </div>
+                    <div class="renewal-item-right">
+                        <span class="renewal-item-value">${this.formatCurrency(renewal.annual_value)}</span>
+                        <button class="btn-secondary btn-small view-customer-btn" data-customer-id="${this.escapeHtml(renewal.customer_id)}">
+                            View
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        document.getElementById('modal-body').innerHTML = `
+            <div class="detail-section">
+                <div class="renewals-list-container">
+                    ${renewalsHtml}
+                </div>
+            </div>
+        `;
+
+        // Add click handlers
+        document.querySelectorAll('.view-customer-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const customerId = btn.dataset.customerId;
+                this.showClientDetail(customerId);
+            });
+        });
+
+        document.querySelectorAll('.renewal-list-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const customerId = item.dataset.customerId;
+                this.showClientDetail(customerId);
+            });
+        });
+    }
+
+    truncate(str, length) {
+        if (!str) return '';
+        return str.length > length ? str.substring(0, length) + '...' : str;
+    }
+
+    formatCurrencyCompact(amount) {
+        if (amount >= 1000000) {
+            return '$' + (amount / 1000000).toFixed(1) + 'M';
+        } else if (amount >= 1000) {
+            return '$' + (amount / 1000).toFixed(0) + 'K';
+        }
+        return '$' + amount;
     }
 
     // Utility methods

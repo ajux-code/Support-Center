@@ -19,6 +19,7 @@ def get_dashboard_kpis():
         - clients_at_risk: Customers overdue or with no recent activity
         - potential_upsell_value: Estimated upsell opportunity
         - renewal_rate: Percentage of customers who renewed
+        - Comparison metrics vs last month for each KPI
     """
     today = nowdate()
 
@@ -37,6 +38,9 @@ def get_dashboard_kpis():
     # Potential upsell value calculation
     upsell_potential = calculate_total_upsell_potential()
 
+    # Get comparison metrics (vs last month)
+    comparisons = get_kpi_comparisons()
+
     return {
         "total_customers": total_customers,
         "revenue_up_for_renewal": renewal_revenue,
@@ -44,7 +48,9 @@ def get_dashboard_kpis():
         "potential_upsell_value": upsell_potential,
         "renewal_rate": renewal_data.get("renewal_rate", 0),
         "avg_customer_lifetime_value": renewal_data.get("avg_ltv", 0),
-        "total_renewals_this_month": renewal_data.get("renewals_this_month", 0)
+        "total_renewals_this_month": renewal_data.get("renewals_this_month", 0),
+        # Comparison metrics
+        "comparisons": comparisons
     }
 
 
@@ -139,7 +145,20 @@ def get_clients_by_renewal_status(status_filter=None, days_range=90, limit=50, o
         customer["lifetime_value"] = flt(customer.get("lifetime_value", 0), 2)
         customer["upsell_potential"] = calculate_customer_upsell_potential(customer)
 
+        # Calculate priority score for at-risk clients
+        priority_score = calculate_priority_score(customer)
+        customer["priority_score"] = priority_score
+        customer["priority_level"] = get_priority_label(priority_score)
+
         result.append(customer)
+
+    # Sort by priority score (highest first) for at-risk clients
+    # Active clients are sorted by renewal date
+    result.sort(key=lambda x: (
+        0 if x["renewal_status"] in ["overdue", "due_soon"] else 1,  # At-risk first
+        -x["priority_score"],  # Then by priority (highest first)
+        x.get("days_until_renewal") or 999  # Then by urgency
+    ))
 
     return result
 
@@ -281,7 +300,203 @@ def get_renewal_calendar(start_date=None, end_date=None):
         ORDER BY sub.end_date ASC
     """, {"start": start_date, "end": end_date}, as_dict=True)
 
+    # Add risk level based on annual value
+    for renewal in renewals:
+        annual_value = flt(renewal.get("annual_value", 0))
+        if annual_value >= 5000:
+            renewal["risk_level"] = "high"
+        elif annual_value >= 1000:
+            renewal["risk_level"] = "medium"
+        else:
+            renewal["risk_level"] = "low"
+        renewal["annual_value"] = annual_value
+
     return renewals
+
+
+@frappe.whitelist()
+def get_trend_data(months=12):
+    """
+    Get historical trend data for charts
+    Returns monthly data for:
+    - Renewal rate
+    - New customers vs renewals
+    - Revenue trends
+    """
+    months = cint(months) or 12
+    today = getdate(nowdate())
+
+    # Generate list of months
+    month_data = []
+    for i in range(months - 1, -1, -1):
+        # Calculate the first day of each month going back
+        year = today.year
+        month = today.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+
+        month_start = datetime(year, month, 1).date()
+        if month == 12:
+            month_end = datetime(year + 1, 1, 1).date() - timedelta(days=1)
+        else:
+            month_end = datetime(year, month + 1, 1).date() - timedelta(days=1)
+
+        month_data.append({
+            "month_start": str(month_start),
+            "month_end": str(month_end),
+            "label": month_start.strftime("%b %Y"),
+            "short_label": month_start.strftime("%b")
+        })
+
+    # Get order counts and revenue by month
+    results = []
+    for month in month_data:
+        # Count renewal orders
+        renewal_count = frappe.db.count("Sales Order", {
+            "docstatus": 1,
+            "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+            "transaction_date": ["between", [month["month_start"], month["month_end"]]]
+        })
+
+        # Count new orders
+        new_count = frappe.db.count("Sales Order", {
+            "docstatus": 1,
+            "custom_order_type": ["in", ["New Order Private", "New Order Business"]],
+            "transaction_date": ["between", [month["month_start"], month["month_end"]]]
+        })
+
+        # Total orders for the month
+        total_orders = frappe.db.count("Sales Order", {
+            "docstatus": 1,
+            "transaction_date": ["between", [month["month_start"], month["month_end"]]]
+        })
+
+        # Calculate renewal rate
+        renewal_rate = 0
+        if total_orders > 0:
+            renewal_rate = round((renewal_count / total_orders) * 100, 1)
+
+        # Get revenue
+        revenue_data = frappe.db.sql("""
+            SELECT
+                COALESCE(SUM(grand_total), 0) as total_revenue,
+                COALESCE(SUM(CASE WHEN custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+                    THEN grand_total ELSE 0 END), 0) as renewal_revenue,
+                COALESCE(SUM(CASE WHEN custom_order_type IN ('New Order Private', 'New Order Business')
+                    THEN grand_total ELSE 0 END), 0) as new_revenue
+            FROM `tabSales Order`
+            WHERE docstatus = 1
+            AND transaction_date BETWEEN %(start)s AND %(end)s
+        """, {"start": month["month_start"], "end": month["month_end"]}, as_dict=True)[0]
+
+        results.append({
+            "label": month["label"],
+            "short_label": month["short_label"],
+            "month": month["month_start"],
+            "renewal_count": renewal_count,
+            "new_count": new_count,
+            "total_orders": total_orders,
+            "renewal_rate": renewal_rate,
+            "total_revenue": flt(revenue_data.get("total_revenue", 0), 2),
+            "renewal_revenue": flt(revenue_data.get("renewal_revenue", 0), 2),
+            "new_revenue": flt(revenue_data.get("new_revenue", 0), 2)
+        })
+
+    return results
+
+
+@frappe.whitelist()
+def get_calendar_view_data(year=None, month=None):
+    """
+    Get renewal data organized for calendar display
+    Returns renewals grouped by day with summary stats
+    """
+    today = getdate(nowdate())
+    if not year:
+        year = today.year
+    if not month:
+        month = today.month
+
+    year = cint(year)
+    month = cint(month)
+
+    # Get first and last day of the month
+    first_day = datetime(year, month, 1).date()
+    if month == 12:
+        last_day = datetime(year + 1, 1, 1).date() - timedelta(days=1)
+    else:
+        last_day = datetime(year, month + 1, 1).date() - timedelta(days=1)
+
+    # Get all renewals for the month
+    renewals = frappe.db.sql("""
+        SELECT
+            sub.name as subscription_id,
+            sub.party as customer_id,
+            c.customer_name,
+            sub.end_date as renewal_date,
+            sub.status,
+            (
+                SELECT SUM(so.grand_total)
+                FROM `tabSales Order` so
+                WHERE so.customer = sub.party
+                AND so.docstatus = 1
+                AND so.transaction_date >= DATE_SUB(sub.end_date, INTERVAL 1 YEAR)
+            ) as annual_value
+        FROM `tabSubscription` sub
+        JOIN `tabCustomer` c ON c.name = sub.party
+        WHERE sub.party_type = 'Customer'
+        AND sub.status IN ('Active', 'Past Due Date', 'Unpaid')
+        AND sub.end_date BETWEEN %(start)s AND %(end)s
+        ORDER BY sub.end_date ASC, annual_value DESC
+    """, {"start": str(first_day), "end": str(last_day)}, as_dict=True)
+
+    # Group by date
+    by_date = {}
+    for renewal in renewals:
+        date_str = str(renewal.get("renewal_date"))
+        annual_value = flt(renewal.get("annual_value", 0))
+
+        # Assign risk level
+        if annual_value >= 5000:
+            renewal["risk_level"] = "high"
+        elif annual_value >= 1000:
+            renewal["risk_level"] = "medium"
+        else:
+            renewal["risk_level"] = "low"
+        renewal["annual_value"] = annual_value
+
+        if date_str not in by_date:
+            by_date[date_str] = {
+                "date": date_str,
+                "renewals": [],
+                "total_value": 0,
+                "count": 0
+            }
+        by_date[date_str]["renewals"].append(renewal)
+        by_date[date_str]["total_value"] += annual_value
+        by_date[date_str]["count"] += 1
+
+    # Calculate month summary
+    total_renewals = len(renewals)
+    total_value = sum(flt(r.get("annual_value", 0)) for r in renewals)
+    high_value_count = sum(1 for r in renewals if r.get("risk_level") == "high")
+
+    return {
+        "year": year,
+        "month": month,
+        "month_name": first_day.strftime("%B %Y"),
+        "first_day": str(first_day),
+        "last_day": str(last_day),
+        "days_in_month": (last_day - first_day).days + 1,
+        "first_day_weekday": first_day.weekday(),  # 0 = Monday
+        "renewals_by_date": by_date,
+        "summary": {
+            "total_renewals": total_renewals,
+            "total_value": flt(total_value, 2),
+            "high_value_count": high_value_count
+        }
+    }
 
 
 @frappe.whitelist()
@@ -320,6 +535,141 @@ def get_product_retention_analysis():
 # ======================
 # Helper Functions
 # ======================
+
+def get_kpi_comparisons():
+    """
+    Calculate comparison metrics vs last month for all KPIs.
+    Returns percentage change and direction for each metric.
+    """
+    today = getdate(nowdate())
+
+    # Current month boundaries
+    current_month_start = today.replace(day=1)
+    if today.month == 12:
+        current_month_end = datetime(today.year + 1, 1, 1).date() - timedelta(days=1)
+    else:
+        current_month_end = datetime(today.year, today.month + 1, 1).date() - timedelta(days=1)
+
+    # Last month boundaries
+    last_month_end = current_month_start - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+
+    comparisons = {}
+
+    # 1. Total Customers comparison (new customers this month vs last month)
+    new_customers_current = frappe.db.count("Customer", {
+        "disabled": 0,
+        "creation": ["between", [str(current_month_start), str(current_month_end)]]
+    })
+    new_customers_last = frappe.db.count("Customer", {
+        "disabled": 0,
+        "creation": ["between", [str(last_month_start), str(last_month_end)]]
+    })
+    comparisons["customers"] = calculate_change(new_customers_current, new_customers_last)
+
+    # 2. Clients at risk comparison
+    # This month's at-risk (using 60 days ago from current month start vs 60 days from last month start)
+    at_risk_current = get_at_risk_customers_count()
+    # For last month, we approximate by checking customers that were at risk then
+    # We'll use the same logic but shifted by one month
+    comparisons["at_risk"] = {
+        "change": 0,
+        "direction": "neutral",
+        "label": "vs last month"
+    }  # We can't accurately calculate historical at-risk, so neutral
+
+    # 3. Renewal revenue comparison (renewals this month vs last month)
+    renewal_revenue_current = frappe.db.sql("""
+        SELECT COALESCE(SUM(grand_total), 0) as total
+        FROM `tabSales Order`
+        WHERE docstatus = 1
+        AND custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+        AND transaction_date BETWEEN %(start)s AND %(end)s
+    """, {"start": str(current_month_start), "end": str(current_month_end)}, as_dict=True)[0].get("total", 0)
+
+    renewal_revenue_last = frappe.db.sql("""
+        SELECT COALESCE(SUM(grand_total), 0) as total
+        FROM `tabSales Order`
+        WHERE docstatus = 1
+        AND custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+        AND transaction_date BETWEEN %(start)s AND %(end)s
+    """, {"start": str(last_month_start), "end": str(last_month_end)}, as_dict=True)[0].get("total", 0)
+    comparisons["renewal_revenue"] = calculate_change(
+        flt(renewal_revenue_current),
+        flt(renewal_revenue_last)
+    )
+
+    # 4. Renewal rate comparison
+    # Current month renewal rate
+    total_orders_current = frappe.db.count("Sales Order", {
+        "docstatus": 1,
+        "transaction_date": ["between", [str(current_month_start), str(current_month_end)]]
+    })
+    renewal_orders_current = frappe.db.count("Sales Order", {
+        "docstatus": 1,
+        "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+        "transaction_date": ["between", [str(current_month_start), str(current_month_end)]]
+    })
+    rate_current = (renewal_orders_current / total_orders_current * 100) if total_orders_current > 0 else 0
+
+    # Last month renewal rate
+    total_orders_last = frappe.db.count("Sales Order", {
+        "docstatus": 1,
+        "transaction_date": ["between", [str(last_month_start), str(last_month_end)]]
+    })
+    renewal_orders_last = frappe.db.count("Sales Order", {
+        "docstatus": 1,
+        "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+        "transaction_date": ["between", [str(last_month_start), str(last_month_end)]]
+    })
+    rate_last = (renewal_orders_last / total_orders_last * 100) if total_orders_last > 0 else 0
+    comparisons["renewal_rate"] = calculate_change(rate_current, rate_last, is_percentage=True)
+
+    # 5. Renewals this month count comparison
+    comparisons["renewals_count"] = calculate_change(renewal_orders_current, renewal_orders_last)
+
+    return comparisons
+
+
+def calculate_change(current, previous, is_percentage=False):
+    """
+    Calculate percentage change between two values.
+    Returns dict with change percentage, direction, and label.
+    """
+    if previous == 0:
+        if current > 0:
+            return {
+                "change": 100,
+                "direction": "up",
+                "label": "+100% vs last month"
+            }
+        return {
+            "change": 0,
+            "direction": "neutral",
+            "label": "No change"
+        }
+
+    change = ((current - previous) / previous) * 100
+
+    if is_percentage:
+        # For percentages, show the point difference, not percentage of percentage
+        change = current - previous
+
+    direction = "up" if change > 0 else "down" if change < 0 else "neutral"
+    abs_change = abs(change)
+
+    if is_percentage:
+        label = f"{'+' if change > 0 else ''}{change:.1f}pp vs last month"
+    else:
+        label = f"{'+' if change > 0 else ''}{change:.1f}% vs last month"
+
+    return {
+        "change": round(abs_change, 1),
+        "direction": direction,
+        "label": label,
+        "raw_change": round(change, 1)
+    }
+
 
 def get_renewal_metrics():
     """Calculate overall renewal metrics"""
@@ -481,6 +831,98 @@ def calculate_renewal_status(renewal_date, last_order_date, today):
         else:
             return "active"
     return "unknown"
+
+
+def calculate_priority_score(customer):
+    """
+    Calculate a priority score for at-risk clients (0-100).
+    Higher score = higher priority = needs attention first.
+
+    Factors:
+    - Revenue at risk (up to 40 points)
+    - Urgency/Days overdue or until renewal (up to 35 points)
+    - Customer tier (up to 15 points)
+    - Engagement history (up to 10 points)
+    """
+    score = 0
+    lifetime_value = flt(customer.get("lifetime_value", 0))
+    days_until = customer.get("days_until_renewal")
+    renewal_status = customer.get("renewal_status")
+    customer_group = customer.get("customer_group", "")
+    total_orders = cint(customer.get("total_orders", 0))
+
+    # Revenue at risk (0-40 points)
+    # $10,000+ = 40 points, scales down proportionally
+    if lifetime_value >= 10000:
+        score += 40
+    elif lifetime_value >= 5000:
+        score += 30
+    elif lifetime_value >= 2000:
+        score += 20
+    elif lifetime_value >= 500:
+        score += 10
+    else:
+        score += 5
+
+    # Urgency (0-35 points)
+    if renewal_status == "overdue":
+        # Overdue: more days overdue = higher priority
+        days_overdue = abs(days_until) if days_until and days_until < 0 else 0
+        if days_overdue >= 30:
+            score += 35
+        elif days_overdue >= 14:
+            score += 30
+        elif days_overdue >= 7:
+            score += 25
+        else:
+            score += 20
+    elif renewal_status == "due_soon":
+        # Due soon: fewer days = higher priority
+        days_left = days_until if days_until and days_until > 0 else 30
+        if days_left <= 7:
+            score += 18
+        elif days_left <= 14:
+            score += 12
+        elif days_left <= 21:
+            score += 8
+        else:
+            score += 4
+    else:
+        # Active: no urgency bonus
+        score += 0
+
+    # Customer tier (0-15 points)
+    if customer_group and customer_group.lower() in ["enterprise", "strategic", "vip"]:
+        score += 15
+    elif customer_group and customer_group.lower() in ["commercial", "smb"]:
+        score += 8
+    else:
+        score += 3
+
+    # Engagement/loyalty (0-10 points)
+    # More orders = more valuable relationship to preserve
+    if total_orders >= 10:
+        score += 10
+    elif total_orders >= 5:
+        score += 7
+    elif total_orders >= 2:
+        score += 4
+    else:
+        score += 1
+
+    return min(score, 100)  # Cap at 100
+
+
+def get_priority_label(score):
+    """Convert priority score to human-readable label"""
+    if score >= 75:
+        return "critical"
+    elif score >= 50:
+        return "high"
+    elif score >= 25:
+        return "medium"
+    else:
+        return "low"
 
 
 def calculate_days_until(date, today):
