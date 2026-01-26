@@ -1,0 +1,923 @@
+frappe.pages['support-dashboard'].on_page_load = function(wrapper) {
+	var page = frappe.ui.make_app_page({
+		parent: wrapper,
+		title: 'Customer Support',
+		single_column: true
+	});
+
+	// Add custom CSS
+	frappe.require('/assets/support_center/css/support-dashboard.css');
+
+	// Store page reference
+	wrapper.support_dashboard_page = page;
+
+	// Initialize the dashboard
+	new SupportDashboardPage(page);
+};
+
+frappe.pages['support-dashboard'].on_page_show = function(wrapper) {
+	// Refresh data when page is shown
+	if (wrapper.support_dashboard_instance) {
+		wrapper.support_dashboard_instance.refresh();
+	}
+};
+
+class SupportDashboardPage {
+	constructor(page) {
+		this.page = page;
+		this.wrapper = page.body;
+		this.dashboard = null;
+
+		this.setup_page_actions();
+		this.render();
+	}
+
+	setup_page_actions() {
+		// Add refresh button
+		this.page.set_secondary_action('Refresh', () => {
+			this.refresh();
+		}, 'refresh');
+	}
+
+	render() {
+		// Render the dashboard HTML
+		this.wrapper.html(this.get_dashboard_html());
+
+		// Initialize the SupportDashboard class after DOM is ready
+		setTimeout(() => {
+			this.init_dashboard();
+		}, 100);
+	}
+
+	init_dashboard() {
+		// Initialize global variables that the original JS expects
+		window.DASHBOARD_VIEW_MODE = 'list';
+		window.DASHBOARD_RECORD_ID = '';
+		window.DASHBOARD_RECORD_TYPE = '';
+		window.DASHBOARD_CUSTOMER_ID = '';
+
+		// Check URL for record params
+		const urlParams = new URLSearchParams(window.location.search);
+		const customer_id = urlParams.get('customer');
+		const booking_id = urlParams.get('booking');
+		const contact_id = urlParams.get('contact');
+		const user_id = urlParams.get('user');
+		const ticket_id = urlParams.get('ticket');
+
+		if (customer_id) {
+			window.DASHBOARD_VIEW_MODE = 'detail';
+			window.DASHBOARD_RECORD_ID = customer_id;
+			window.DASHBOARD_RECORD_TYPE = 'customer';
+		} else if (booking_id) {
+			window.DASHBOARD_VIEW_MODE = 'detail';
+			window.DASHBOARD_RECORD_ID = booking_id;
+			window.DASHBOARD_RECORD_TYPE = 'booking';
+		} else if (contact_id) {
+			window.DASHBOARD_VIEW_MODE = 'detail';
+			window.DASHBOARD_RECORD_ID = contact_id;
+			window.DASHBOARD_RECORD_TYPE = 'contact';
+		} else if (user_id) {
+			window.DASHBOARD_VIEW_MODE = 'detail';
+			window.DASHBOARD_RECORD_ID = user_id;
+			window.DASHBOARD_RECORD_TYPE = 'user';
+		} else if (ticket_id) {
+			window.DASHBOARD_VIEW_MODE = 'detail';
+			window.DASHBOARD_RECORD_ID = ticket_id;
+			window.DASHBOARD_RECORD_TYPE = 'ticket';
+		}
+
+		// Load the main dashboard JS if not already loaded
+		if (typeof SupportDashboard === 'undefined') {
+			frappe.require('/assets/support_center/js/support-dashboard.js', () => {
+				this.dashboard = new SupportDashboard();
+				this.page.wrapper[0].support_dashboard_instance = this;
+			});
+		} else {
+			this.dashboard = new SupportDashboard();
+			this.page.wrapper[0].support_dashboard_instance = this;
+		}
+	}
+
+	refresh() {
+		if (this.dashboard) {
+			// Reload the customer list
+			if (this.dashboard.showingCustomerList) {
+				this.dashboard.loadCustomerList();
+				this.dashboard.loadCategoryCounts();
+			}
+		}
+	}
+
+	get_dashboard_html() {
+		return `
+		<div class="support-dashboard">
+			<!-- Main Content -->
+			<div class="dashboard-content" id="dashboard-content">
+				<!-- Customer List (shown by default) -->
+				<div class="customer-list-view">
+					<!-- Filter Toolbar - Inline Layout -->
+					<div class="filter-toolbar">
+						<!-- Source Filter Tabs -->
+						<div class="category-tabs" role="tablist" aria-label="Filter by source">
+							<button class="category-tab active" data-category="all" role="tab" aria-selected="true">
+								<span class="tab-label">All</span>
+								<span class="tab-count" data-count="all">-</span>
+							</button>
+							<button class="category-tab" data-category="contact" role="tab" aria-selected="false">
+								<span class="tab-label">Customers</span>
+								<span class="tab-count" data-count="contact">-</span>
+							</button>
+							<button class="category-tab" data-category="customer" role="tab" aria-selected="false">
+								<span class="tab-label">Sales Orders</span>
+								<span class="tab-count" data-count="customer">-</span>
+							</button>
+							<button class="category-tab" data-category="booking" role="tab" aria-selected="false">
+								<span class="tab-label">Bookings</span>
+								<span class="tab-count" data-count="booking">-</span>
+							</button>
+							<button class="category-tab" data-category="ticket" role="tab" aria-selected="false">
+								<span class="tab-label">Support Tickets</span>
+								<span class="tab-count" data-count="ticket">-</span>
+							</button>
+						</div>
+
+						<!-- Search Input -->
+						<div class="search-container">
+							<div class="search-input-wrapper">
+								<div class="search-icon">
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+										<circle cx="11" cy="11" r="8"></circle>
+										<path d="m21 21-4.35-4.35"></path>
+									</svg>
+								</div>
+								<input
+									type="text"
+									id="customer-search"
+									placeholder="Search..."
+									autocomplete="off"
+								>
+								<div class="search-shortcut">Ctrl+K</div>
+							</div>
+							<div id="search-suggestions" class="suggestions-dropdown"></div>
+						</div>
+					</div>
+
+					<div class="customer-table-container">
+						<table class="customer-table" id="customer-table">
+							<thead>
+								<tr>
+									<th>Customer</th>
+									<th>Email</th>
+									<th>Phone</th>
+									<th>Source</th>
+									<th>Actions</th>
+								</tr>
+							</thead>
+							<tbody id="customer-table-body">
+								<tr class="loading-row">
+									<td colspan="5">
+										<div class="table-loading">
+											<div class="loading-spinner-small"></div>
+											<span>Loading customers...</span>
+										</div>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+
+			${this.get_templates_html()}
+			${this.get_modals_html()}
+		</div>
+		`;
+	}
+
+	get_templates_html() {
+		return `
+		<!-- Content Template (hidden, cloned on search) -->
+		<template id="dashboard-template">
+			<div class="dashboard-grid">
+				<!-- Left Column -->
+				<div class="left-column">
+					<!-- Customer Profile Card -->
+					<div class="card customer-profile">
+						<h2>Customer Profile</h2>
+						<div class="profile-content">
+							<div class="profile-header">
+								<div class="profile-avatar">
+									<span data-field="customer_initials">JD</span>
+								</div>
+								<div class="profile-info">
+									<div class="profile-name" data-field="customer_name"></div>
+									<div class="profile-id" data-field="customer_id"></div>
+								</div>
+							</div>
+
+							<div class="profile-contact">
+								<div class="contact-item">
+									<span class="contact-icon">
+										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+											<rect width="20" height="16" x="2" y="4" rx="2"></rect>
+											<path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+										</svg>
+									</span>
+									<span class="contact-value" data-field="email"></span>
+								</div>
+								<div class="contact-item">
+									<span class="contact-icon">
+										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+										</svg>
+									</span>
+									<span class="contact-value" data-field="phone"></span>
+								</div>
+								<div class="contact-item">
+									<span class="contact-icon">
+										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M3 21h18"></path>
+											<path d="M5 21V7l8-4v18"></path>
+											<path d="M19 21V11l-6-4"></path>
+											<path d="M9 9v.01"></path>
+											<path d="M9 12v.01"></path>
+											<path d="M9 15v.01"></path>
+											<path d="M9 18v.01"></path>
+										</svg>
+									</span>
+									<span class="contact-value" data-field="company_name"></span>
+								</div>
+								<div class="contact-item">
+									<span class="contact-icon">
+										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+											<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+											<circle cx="12" cy="10" r="3"></circle>
+										</svg>
+									</span>
+									<span class="contact-value" data-field="address"></span>
+								</div>
+							</div>
+
+							<hr>
+
+							<div class="profile-stats">
+								<div class="stat">
+									<span class="stat-label">Customer Since</span>
+									<span class="stat-value" data-field="customer_since"></span>
+								</div>
+								<div class="stat">
+									<span class="stat-label">Total Orders</span>
+									<span class="stat-value stat-highlight" data-field="total_orders"></span>
+								</div>
+								<div class="stat">
+									<span class="stat-label">Total Meetings</span>
+									<span class="stat-value stat-highlight" data-field="total_meetings"></span>
+								</div>
+								<div class="stat">
+									<span class="stat-label">Lifetime Value</span>
+									<span class="stat-value stat-highlight" data-field="lifetime_value"></span>
+								</div>
+								<div class="stat">
+									<span class="stat-label">Outstanding</span>
+									<span class="stat-value outstanding" data-field="outstanding_amount"></span>
+								</div>
+							</div>
+
+							<div class="profile-actions">
+								<button class="btn-secondary" data-action="view-full">
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path>
+										<path d="M14 2v4a2 2 0 0 0 2 2h4"></path>
+									</svg>
+									View Full Profile
+								</button>
+							</div>
+						</div>
+					</div>
+
+					<!-- Quick Actions Card -->
+					<div class="card quick-actions">
+						<h2>Quick Actions</h2>
+						<div class="actions-grid">
+							<button class="action-btn" data-action="book-meeting">
+								<span class="action-icon">
+									<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+										<line x1="16" x2="16" y1="2" y2="6"></line>
+										<line x1="8" x2="8" y1="2" y2="6"></line>
+										<line x1="3" x2="21" y1="10" y2="10"></line>
+										<path d="m9 16 2 2 4-4"></path>
+									</svg>
+								</span>
+								<span class="action-label">Book Meeting</span>
+							</button>
+							<button class="action-btn" data-action="send-email">
+								<span class="action-icon">
+									<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<rect width="20" height="16" x="2" y="4" rx="2"></rect>
+										<path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+									</svg>
+								</span>
+								<span class="action-label">Send Email</span>
+							</button>
+							<button class="action-btn" data-action="create-note">
+								<span class="action-icon">
+									<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+										<path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z"></path>
+									</svg>
+								</span>
+								<span class="action-label">Create Note</span>
+							</button>
+							<button class="action-btn" data-action="create-order">
+								<span class="action-icon">
+									<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<circle cx="8" cy="21" r="1"></circle>
+										<circle cx="19" cy="21" r="1"></circle>
+										<path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path>
+									</svg>
+								</span>
+								<span class="action-label">New Order</span>
+							</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- Right Column -->
+				<div class="right-column">
+					<!-- View Toggle -->
+					<div class="view-toggle">
+						<button class="toggle-btn active" data-view="separate">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<rect x="3" y="3" width="7" height="7"></rect>
+								<rect x="14" y="3" width="7" height="7"></rect>
+								<rect x="3" y="14" width="7" height="7"></rect>
+								<rect x="14" y="14" width="7" height="7"></rect>
+							</svg>
+							Separate
+						</button>
+						<button class="toggle-btn" data-view="timeline">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<line x1="12" y1="2" x2="12" y2="22"></line>
+								<circle cx="12" cy="6" r="2"></circle>
+								<circle cx="12" cy="12" r="2"></circle>
+								<circle cx="12" cy="18" r="2"></circle>
+							</svg>
+							Timeline
+						</button>
+					</div>
+
+					<!-- Separate View (default) -->
+					<div class="separate-view" data-view-content="separate">
+						<!-- Recent Orders Panel -->
+						<div class="card recent-orders">
+							<div class="card-header">
+								<h2>Recent Orders</h2>
+								<button class="btn-link-small" data-action="view-all-orders">View All</button>
+							</div>
+							<div class="orders-table-container" data-container="orders">
+								<!-- Orders table populated here -->
+							</div>
+						</div>
+
+						<!-- Support History Panel -->
+						<div class="card support-history">
+							<div class="card-header">
+								<h2>Support History</h2>
+								<button class="btn-link-small" data-action="view-all-history">View All</button>
+							</div>
+							<div class="history-list" data-container="history">
+								<!-- History populated here -->
+							</div>
+						</div>
+					</div>
+
+					<!-- Unified Timeline View -->
+					<div class="timeline-view" data-view-content="timeline" style="display: none;">
+						<div class="card unified-timeline">
+							<div class="card-header">
+								<h2>Customer Timeline</h2>
+								<span class="timeline-subtitle">All activity in chronological order</span>
+							</div>
+							<div class="timeline-container" data-container="timeline">
+								<div class="timeline-loading">
+									<div class="loading-spinner-small"></div>
+									<span>Loading timeline...</span>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</template>
+
+		<!-- Order Card Template -->
+		<template id="order-card-template">
+			<div class="order-card">
+				<div class="order-header">
+					<span class="order-id" data-field="order_id"></span>
+					<span class="order-status" data-field="status"></span>
+				</div>
+				<div class="order-details">
+					<div class="order-amount" data-field="amount"></div>
+					<div class="order-date" data-field="date"></div>
+				</div>
+				<div class="order-items">
+					<span data-field="items_count"></span>
+				</div>
+				<div class="order-actions">
+					<button class="btn-link" data-action="view-order">View Details</button>
+					<button class="btn-link tracking-btn" data-action="track-order" style="display: none;">
+						Track Package
+					</button>
+				</div>
+			</div>
+		</template>
+
+		<!-- History Item Template -->
+		<template id="history-item-template">
+			<div class="history-item">
+				<div class="history-icon" data-field="icon"></div>
+				<div class="history-content">
+					<div class="history-title" data-field="title"></div>
+					<div class="history-meta" data-field="meta"></div>
+					<div class="history-notes" data-field="notes" style="display: none;"></div>
+				</div>
+				<button class="history-action" data-action="view-detail">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="m9 18 6-6-6-6"></path>
+					</svg>
+				</button>
+			</div>
+		</template>
+
+		<!-- Timeline Item Template -->
+		<template id="timeline-item-template">
+			<div class="timeline-item">
+				<div class="timeline-marker">
+					<div class="timeline-icon" data-field="icon"></div>
+					<div class="timeline-line"></div>
+				</div>
+				<div class="timeline-content">
+					<div class="timeline-header">
+						<span class="timeline-type" data-field="type-badge"></span>
+						<span class="timeline-date" data-field="date"></span>
+					</div>
+					<div class="timeline-title" data-field="title"></div>
+					<div class="timeline-details" data-field="details"></div>
+					<div class="timeline-amount" data-field="amount" style="display: none;"></div>
+					<div class="timeline-status" data-field="status"></div>
+				</div>
+				<button class="timeline-action" data-action="view-timeline-detail">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="m9 18 6-6-6-6"></path>
+					</svg>
+				</button>
+			</div>
+		</template>
+
+		<!-- Order Item Row Template -->
+		<template id="order-item-template">
+			<div class="order-item-row">
+				<div class="item-image">
+					<img data-field="image" src="" alt="">
+					<div class="no-image" style="display:none;">
+						<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+							<rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect>
+							<circle cx="9" cy="9" r="2"></circle>
+							<path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path>
+						</svg>
+					</div>
+				</div>
+				<div class="item-details">
+					<div class="item-name" data-field="item_name"></div>
+					<div class="item-code" data-field="item_code"></div>
+					<div class="item-description" data-field="description"></div>
+				</div>
+				<div class="item-qty">
+					<span data-field="qty"></span> x <span data-field="rate"></span>
+				</div>
+				<div class="item-discount" data-field="discount_display"></div>
+				<div class="item-total" data-field="amount"></div>
+			</div>
+		</template>
+
+		<!-- Booking Dashboard Template -->
+		<template id="booking-dashboard-template">
+			<div class="dashboard-grid">
+				<div class="left-column">
+					<div class="card booking-profile">
+						<h2>Meeting Booking</h2>
+						<div class="profile-content">
+							<div class="profile-header">
+								<div class="profile-avatar booking-avatar">
+									<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+										<line x1="16" x2="16" y1="2" y2="6"></line>
+										<line x1="8" x2="8" y1="2" y2="6"></line>
+										<line x1="3" x2="21" y1="10" y2="10"></line>
+									</svg>
+								</div>
+								<div class="profile-info">
+									<div class="profile-name" data-field="customer_name"></div>
+									<div class="profile-id" data-field="booking_id"></div>
+									<span class="status-badge" data-field="booking_status_badge"></span>
+								</div>
+							</div>
+							<div class="profile-contact">
+								<div class="contact-item">
+									<span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></span>
+									<span class="contact-value" data-field="email"></span>
+								</div>
+								<div class="contact-item">
+									<span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></span>
+									<span class="contact-value" data-field="phone"></span>
+								</div>
+							</div>
+							<hr>
+							<div class="booking-details-section">
+								<h3>Meeting Details</h3>
+								<div class="detail-row"><span class="detail-label">Date & Time</span><span class="detail-value" data-field="meeting_datetime"></span></div>
+								<div class="detail-row"><span class="detail-label">Meeting Type</span><span class="detail-value" data-field="meeting_type"></span></div>
+								<div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value" data-field="duration"></span></div>
+								<div class="detail-row"><span class="detail-label">Department</span><span class="detail-value" data-field="department"></span></div>
+							</div>
+							<div class="profile-stats">
+								<div class="stat"><span class="stat-label">Total Bookings</span><span class="stat-value stat-highlight" data-field="total_bookings"></span></div>
+								<div class="stat"><span class="stat-label">Created</span><span class="stat-value" data-field="creation_date"></span></div>
+							</div>
+							<div class="customer-notes-section" data-container="notes-section" style="display: none;">
+								<h3>Customer Notes</h3>
+								<p class="customer-notes" data-field="customer_notes"></p>
+							</div>
+							<div class="profile-actions">
+								<button class="btn-secondary" data-action="view-full-booking">
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+									Open in Meeting Manager
+								</button>
+							</div>
+						</div>
+					</div>
+					<div class="card linked-customer" data-container="linked-customer" style="display: none;">
+						<h2>Linked ERPNext Customer</h2>
+						<div class="linked-customer-info">
+							<p><strong>Customer:</strong> <span data-field="linked_customer_name"></span></p>
+							<p class="linked-customer-id"><small data-field="linked_customer_id"></small></p>
+							<div class="linked-customer-actions">
+								<button class="btn-primary" data-action="view-linked-customer">View Customer Profile</button>
+								<button class="btn-secondary btn-small" data-action="unlink-customer">Unlink</button>
+							</div>
+						</div>
+					</div>
+					<div class="card no-customer-linked" data-container="no-customer-linked" style="display: none;">
+						<h2>No ERPNext Customer Linked</h2>
+						<p class="no-customer-message">This booking is not linked to an ERPNext customer record.</p>
+						<div class="link-customer-actions">
+							<button class="btn-primary" data-action="create-customer-from-booking">Create New Customer</button>
+							<button class="btn-secondary" data-action="link-to-existing-customer">Link to Existing</button>
+						</div>
+					</div>
+					<div class="card quick-actions">
+						<h2>Quick Actions</h2>
+						<div class="actions-grid">
+							<button class="action-btn" data-action="send-email-booking"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></span><span class="action-label">Send Email</span></button>
+							<button class="action-btn" data-action="reschedule-booking"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21h5v-5"></path></svg></span><span class="action-label">Reschedule</span></button>
+						</div>
+					</div>
+				</div>
+				<div class="right-column">
+					<div class="card assigned-users"><h2>Assigned Hosts</h2><div class="users-list" data-container="assigned-users"><p class="empty-message">No hosts assigned</p></div></div>
+					<div class="card other-bookings"><h2>Other Bookings</h2><div class="bookings-list" data-container="other-bookings"><p class="empty-message">No other bookings found</p></div></div>
+				</div>
+			</div>
+		</template>
+
+		<!-- Contact Dashboard Template -->
+		<template id="contact-dashboard-template">
+			<div class="dashboard-grid">
+				<div class="left-column">
+					<div class="card contact-profile">
+						<h2>Contact Profile</h2>
+						<div class="profile-content">
+							<div class="profile-header">
+								<div class="profile-avatar contact-avatar"><span data-field="contact_initials">??</span></div>
+								<div class="profile-info">
+									<div class="profile-name" data-field="contact_name"></div>
+									<div class="profile-id" data-field="contact_id"></div>
+								</div>
+							</div>
+							<div class="profile-contact">
+								<div class="contact-item"><span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></span><span class="contact-value" data-field="email"></span></div>
+								<div class="contact-item"><span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></span><span class="contact-value" data-field="phone"></span></div>
+								<div class="contact-item"><span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"></path><path d="M5 21V7l8-4v18"></path><path d="M19 21V11l-6-4"></path></svg></span><span class="contact-value" data-field="company_name"></span></div>
+								<div class="contact-item" data-container="designation-row"><span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span><span class="contact-value" data-field="designation"></span></div>
+							</div>
+							<hr>
+							<div class="profile-stats">
+								<div class="stat"><span class="stat-label">Contact Since</span><span class="stat-value" data-field="creation_date"></span></div>
+								<div class="stat"><span class="stat-label">Meeting Bookings</span><span class="stat-value stat-highlight" data-field="total_bookings"></span></div>
+								<div class="stat"><span class="stat-label">Primary Contact</span><span class="stat-value" data-field="is_primary"></span></div>
+							</div>
+							<div class="profile-actions">
+								<button class="btn-secondary" data-action="view-full-contact"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>Open in Frappe</button>
+							</div>
+						</div>
+					</div>
+					<div class="card quick-actions">
+						<h2>Quick Actions</h2>
+						<div class="actions-grid">
+							<button class="action-btn" data-action="book-meeting-contact"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg></span><span class="action-label">Book Meeting</span></button>
+							<button class="action-btn" data-action="send-email-contact"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></span><span class="action-label">Send Email</span></button>
+						</div>
+					</div>
+				</div>
+				<div class="right-column">
+					<div class="card linked-records"><h2>Linked Records</h2><div class="records-list" data-container="linked-records"><p class="empty-message">No linked records</p></div></div>
+					<div class="card contact-bookings"><h2>Meeting Bookings</h2><div class="bookings-list" data-container="contact-bookings"><p class="empty-message">No bookings found</p></div></div>
+				</div>
+			</div>
+		</template>
+
+		<!-- User Dashboard Template -->
+		<template id="user-dashboard-template">
+			<div class="dashboard-grid">
+				<div class="left-column">
+					<div class="card user-profile">
+						<h2>System User</h2>
+						<div class="profile-content">
+							<div class="profile-header">
+								<div class="profile-avatar user-avatar"><span data-field="user_initials">??</span></div>
+								<div class="profile-info">
+									<div class="profile-name" data-field="user_name"></div>
+									<div class="profile-id" data-field="user_id"></div>
+									<span class="status-badge" data-field="user_type_badge"></span>
+								</div>
+							</div>
+							<div class="profile-contact">
+								<div class="contact-item"><span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></span><span class="contact-value" data-field="email"></span></div>
+								<div class="contact-item"><span class="contact-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></span><span class="contact-value" data-field="phone"></span></div>
+							</div>
+							<hr>
+							<div class="profile-stats">
+								<div class="stat"><span class="stat-label">User Since</span><span class="stat-value" data-field="creation_date"></span></div>
+								<div class="stat"><span class="stat-label">Last Login</span><span class="stat-value" data-field="last_login"></span></div>
+								<div class="stat"><span class="stat-label">Bookings Made</span><span class="stat-value stat-highlight" data-field="total_bookings"></span></div>
+								<div class="stat"><span class="stat-label">Meetings Hosted</span><span class="stat-value stat-highlight" data-field="total_hosted"></span></div>
+							</div>
+							<div class="user-roles-section" data-container="roles-section"><h3>Roles</h3><div class="roles-list" data-field="roles"></div></div>
+							<div class="profile-actions">
+								<button class="btn-secondary" data-action="view-full-user"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>Open in Frappe</button>
+							</div>
+						</div>
+					</div>
+					<div class="card linked-customer" data-container="linked-customer-user" style="display: none;">
+						<h2>Linked ERPNext Customer</h2>
+						<div class="linked-customer-info">
+							<p><strong>Customer:</strong> <span data-field="linked_customer_name"></span></p>
+							<button class="btn-primary" data-action="view-linked-customer-user">View Customer Profile</button>
+						</div>
+					</div>
+					<div class="card quick-actions">
+						<h2>Quick Actions</h2>
+						<div class="actions-grid">
+							<button class="action-btn" data-action="book-meeting-user"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" x2="16" y1="2" y2="6"></line><line x1="8" x2="8" y1="2" y2="6"></line><line x1="3" x2="21" y1="10" y2="10"></line></svg></span><span class="action-label">Book Meeting</span></button>
+							<button class="action-btn" data-action="send-email-user"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></span><span class="action-label">Send Email</span></button>
+						</div>
+					</div>
+				</div>
+				<div class="right-column">
+					<div class="card user-bookings"><h2>Bookings Made</h2><div class="bookings-list" data-container="user-bookings"><p class="empty-message">No bookings found</p></div></div>
+					<div class="card hosted-meetings"><h2>Meetings Hosted</h2><div class="bookings-list" data-container="hosted-meetings"><p class="empty-message">No hosted meetings found</p></div></div>
+				</div>
+			</div>
+		</template>
+
+		<!-- Ticket Dashboard Template -->
+		<template id="ticket-dashboard-template">
+			<div class="dashboard-grid">
+				<div class="left-column">
+					<div class="card ticket-profile">
+						<h2>Support Ticket</h2>
+						<div class="profile-content">
+							<div class="profile-header">
+								<div class="profile-avatar ticket-avatar"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5v2"></path><path d="M15 11v2"></path><path d="M15 17v2"></path><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"></path></svg></div>
+								<div class="profile-info">
+									<div class="profile-name" data-field="subject"></div>
+									<div class="profile-id" data-field="ticket_id"></div>
+									<span class="status-badge" data-field="status_badge"></span>
+								</div>
+							</div>
+							<div class="ticket-meta">
+								<div class="detail-row"><span class="detail-label">Priority</span><span class="detail-value priority-badge" data-field="priority"></span></div>
+								<div class="detail-row"><span class="detail-label">Type</span><span class="detail-value" data-field="issue_type"></span></div>
+								<div class="detail-row"><span class="detail-label">Raised By</span><span class="detail-value" data-field="raised_by"></span></div>
+								<div class="detail-row"><span class="detail-label">Opened</span><span class="detail-value" data-field="opening_date"></span></div>
+							</div>
+							<hr>
+							<div class="ticket-description-section"><h3>Description</h3><div class="ticket-description" data-field="description"></div></div>
+							<div class="profile-actions">
+								<button class="btn-secondary" data-action="view-full-ticket"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>Open in ERPNext</button>
+							</div>
+						</div>
+					</div>
+					<div class="card linked-customer" data-container="linked-customer-ticket" style="display: none;">
+						<h2>Linked Customer</h2>
+						<div class="linked-customer-info">
+							<p><strong>Customer:</strong> <span data-field="linked_customer_name"></span></p>
+							<p class="linked-customer-id"><small data-field="linked_customer_id"></small></p>
+							<div class="linked-customer-actions">
+								<button class="btn-primary" data-action="view-linked-customer-ticket">View Customer Profile</button>
+							</div>
+						</div>
+					</div>
+					<div class="card quick-actions">
+						<h2>Quick Actions</h2>
+						<div class="actions-grid">
+							<button class="action-btn" data-action="reply-ticket"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path></svg></span><span class="action-label">Reply</span></button>
+							<button class="action-btn" data-action="close-ticket"><span class="action-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></span><span class="action-label">Close Ticket</span></button>
+						</div>
+					</div>
+				</div>
+				<div class="right-column">
+					<div class="card resolution-details" data-container="resolution" style="display: none;"><h2>Resolution</h2><div class="resolution-content" data-field="resolution_details"></div></div>
+					<div class="card ticket-activity"><h2>Activity</h2><div class="activity-list" data-container="ticket-comments"><p class="empty-message">No activity yet</p></div></div>
+					<div class="card related-tickets"><h2>Related Tickets</h2><div class="tickets-list" data-container="related-tickets"><p class="empty-message">No related tickets</p></div></div>
+				</div>
+			</div>
+		</template>
+		`;
+	}
+
+	get_modals_html() {
+		return `
+		<!-- Note Modal -->
+		<div id="note-modal" class="modal" style="display: none;">
+			<div class="modal-overlay" data-action="close-modal"></div>
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2>Create Support Note</h2>
+					<button class="modal-close" data-action="close-modal">
+						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M18 6 6 18"></path>
+							<path d="m6 6 12 12"></path>
+						</svg>
+					</button>
+				</div>
+				<div class="modal-body">
+					<textarea id="note-content" placeholder="Enter note about this customer interaction..." rows="6"></textarea>
+				</div>
+				<div class="modal-footer">
+					<button class="btn-secondary" data-action="close-modal">Cancel</button>
+					<button class="btn-primary" data-action="save-note">
+						<span class="btn-text">Save Note</span>
+						<span class="btn-loading" style="display: none;">Saving...</span>
+					</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Link Customer Modal -->
+		<div id="link-customer-modal" class="modal" style="display: none;">
+			<div class="modal-overlay" data-action="close-link-modal"></div>
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2>Link to ERPNext Customer</h2>
+					<button class="modal-close" data-action="close-link-modal">
+						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M18 6 6 18"></path>
+							<path d="m6 6 12 12"></path>
+						</svg>
+					</button>
+				</div>
+				<div class="modal-body">
+					<div class="form-group">
+						<label for="link-customer-search">Search for customer</label>
+						<input type="text" id="link-customer-search" placeholder="Search by name, email, or phone..." autocomplete="off">
+						<div class="customer-search-results" id="customer-search-results" style="display: none;"></div>
+					</div>
+					<div class="selected-customer" id="selected-customer" style="display: none;">
+						<div class="selected-customer-info">
+							<strong id="selected-customer-name"></strong>
+							<span id="selected-customer-details"></span>
+						</div>
+						<button class="btn-link" data-action="clear-customer-selection">Clear</button>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button class="btn-secondary" data-action="close-link-modal">Cancel</button>
+					<button class="btn-primary" data-action="confirm-link-customer" disabled>
+						<span class="btn-text">Link Customer</span>
+						<span class="btn-loading" style="display: none;">Linking...</span>
+					</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Order Detail Modal -->
+		<div id="order-detail-modal" class="modal order-detail-modal" style="display: none;">
+			<div class="modal-overlay" data-action="close-order-modal"></div>
+			<div class="modal-content order-detail-content">
+				<div class="modal-header">
+					<div class="order-header-info">
+						<h2>Order <span data-field="order_id"></span></h2>
+						<span class="order-status-badge" data-field="status_badge"></span>
+					</div>
+					<button class="modal-close" data-action="close-order-modal">
+						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M18 6 6 18"></path>
+							<path d="m6 6 12 12"></path>
+						</svg>
+					</button>
+				</div>
+				<div class="modal-body order-detail-body">
+					<div class="order-tabs">
+						<button class="tab-btn active" data-tab="items">Items</button>
+						<button class="tab-btn" data-tab="custom">Custom Fields</button>
+						<button class="tab-btn" data-tab="customer">Customer Info</button>
+						<button class="tab-btn" data-tab="payment">Payment</button>
+					</div>
+					<div class="tab-content active" data-tab-content="items">
+						<div class="order-items-list" data-container="items"></div>
+						<div class="order-pricing-breakdown">
+							<div class="pricing-row"><span>Subtotal</span><span data-field="subtotal"></span></div>
+							<div class="pricing-row discount" data-container="discount-row" style="display: none;"><span>Discount</span><span data-field="discount"></span></div>
+							<div class="pricing-row"><span>Tax</span><span data-field="taxes"></span></div>
+							<div class="pricing-row total"><span>Total</span><span data-field="grand_total"></span></div>
+						</div>
+					</div>
+					<div class="tab-content" data-tab-content="custom">
+						<div class="custom-fields-form">
+							<div class="form-section">
+								<h3>Sales Information</h3>
+								<div class="form-grid">
+									<div class="form-row"><label>Salesperson</label><select data-field="custom_salesperson" class="editable-field"></select></div>
+									<div class="form-row"><label>Booker</label><select data-field="custom_booker" class="editable-field"></select></div>
+									<div class="form-row"><label>Order Type</label><select data-field="custom_order_type" class="editable-field"><option value="">-- Select --</option><option value="Extension Private">Extension Private</option><option value="Extension Business">Extension Business</option><option value="New Order Private">New Order Private</option><option value="New Order Business">New Order Business</option><option value="Upgrade">Upgrade</option><option value="Downgrade">Downgrade</option><option value="Renewal">Renewal</option></select></div>
+									<div class="form-row"><label>Product</label><select data-field="custom_product" class="editable-field"><option value="">-- Select --</option><option value="Security">Security</option><option value="Trend Micro">Trend Micro</option><option value="Kaspersky">Kaspersky</option><option value="Bitdefender">Bitdefender</option><option value="Norton">Norton</option><option value="McAfee">McAfee</option><option value="Other">Other</option></select></div>
+									<div class="form-row" data-depends="custom_product=Trend Micro"><label>Trend Micro Seats</label><input type="number" data-field="custom_trend_micro_seats" class="editable-field" min="0"></div>
+								</div>
+							</div>
+							<div class="form-section">
+								<h3>References & Tracking</h3>
+								<div class="form-grid">
+									<div class="form-row"><label>Lead</label><input type="text" data-field="custom_lead" class="editable-field" placeholder="Lead ID"></div>
+									<div class="form-row"><label>Previous Order</label><input type="text" data-field="custom_previous_order" class="editable-field" placeholder="Order ID"></div>
+									<div class="form-row"><label>Company Reg. Number</label><input type="text" data-field="custom_company_reg_number" class="editable-field" maxlength="20"></div>
+									<div class="form-row"><label>External Invoice Number</label><input type="text" data-field="custom_external_invoice_number" class="editable-field"></div>
+								</div>
+							</div>
+							<div class="form-section">
+								<h3>Payment & Status</h3>
+								<div class="form-grid">
+									<div class="form-row"><label>Bank Payment Status</label><select data-field="custom_bank_payment_status" class="editable-field"><option value="">-- Select --</option><option value="Pending">Pending</option><option value="Received">Received</option><option value="Failed">Failed</option><option value="Refunded">Refunded</option><option value="Not Applicable">Not Applicable</option></select></div>
+									<div class="form-row"><label>Deferred Payment Date</label><input type="date" data-field="custom_deferred_payment_date" class="editable-field"></div>
+									<div class="form-row checkbox-row"><label><input type="checkbox" data-field="custom_vip_customer" class="editable-field">VIP Customer</label></div>
+									<div class="form-row checkbox-row"><label><input type="checkbox" data-field="custom_complaint_case" class="editable-field">Complaint Case</label></div>
+								</div>
+							</div>
+							<div class="form-actions">
+								<button class="btn-primary" data-action="save-custom-fields"><span class="btn-text">Save Changes</span><span class="btn-loading" style="display: none;">Saving...</span></button>
+							</div>
+						</div>
+					</div>
+					<div class="tab-content" data-tab-content="customer">
+						<div class="info-columns">
+							<div class="info-section">
+								<h3>Billing</h3>
+								<div class="address-display" data-field="billing_address"></div>
+								<div class="contact-display">
+									<p><strong>Contact:</strong> <span data-field="contact_person"></span></p>
+									<p><strong>Phone:</strong> <span data-field="contact_phone"></span></p>
+									<p><strong>Email:</strong> <span data-field="contact_email"></span></p>
+								</div>
+							</div>
+							<div class="info-section">
+								<h3>Shipping</h3>
+								<div class="address-display" data-field="shipping_address"></div>
+							</div>
+						</div>
+					</div>
+					<div class="tab-content" data-tab-content="payment">
+						<div class="payment-info">
+							<div class="payment-row"><span>Payment Terms</span><span data-field="payment_terms"></span></div>
+							<div class="payment-row"><span>Advance Paid</span><span data-field="advance_paid"></span></div>
+							<div class="payment-schedule" data-container="payment_schedule"></div>
+						</div>
+					</div>
+				</div>
+				<div class="modal-footer order-detail-footer">
+					<button class="btn-secondary" data-action="open-in-erpnext">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+							<polyline points="15 3 21 3 21 9"></polyline>
+							<line x1="10" y1="14" x2="21" y2="3"></line>
+						</svg>
+						Open in ERPNext
+					</button>
+					<button class="btn-secondary" data-action="close-order-modal">Close</button>
+				</div>
+			</div>
+		</div>
+		`;
+	}
+}
