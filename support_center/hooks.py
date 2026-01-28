@@ -17,7 +17,7 @@ add_to_apps_screen = [
 		"name": "support_center",
 		"logo": "/assets/support_center/images/support-dashboard-logo.svg",
 		"title": "Support Center",
-		"route": "/support-dashboard",
+		"route": "/app/support-dashboard",
 		"has_permission": "support_center.api.permissions.has_app_permission"
 	}
 ]
@@ -255,3 +255,11 @@ website_route_rules = [
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+# Fixtures
+# --------
+fixtures = [
+	{
+		"doctype": "Page",
+		"filters": [["name", "in", ["support-dashboard"]]]
+	}
+]

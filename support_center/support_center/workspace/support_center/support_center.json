@@ -1,0 +1,95 @@
+{
+	"name": "Support Center",
+	"doctype": "Workspace",
+	"module": "Support Center",
+	"label": "Support Center",
+	"title": "Support Center",
+	"icon": "support",
+	"indicator_color": "blue",
+	"public": 1,
+	"is_hidden": 0,
+	"hide_custom": 0,
+	"sequence_id": 15.0,
+	"content": "[{\"id\": \"shortcuts_header\", \"type\": \"header\", \"data\": {\"text\": \"<span class='h4'><b>Quick Access</b></span>\", \"col\": 12}}, {\"id\": \"shortcut_dashboard\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Support Dashboard\", \"col\": 4}}, {\"id\": \"shortcut_customers\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Customers\", \"col\": 4}}, {\"id\": \"shortcut_issues\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Issues\", \"col\": 4}}, {\"id\": \"spacer_1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"links_header\", \"type\": \"header\", \"data\": {\"text\": \"<span class='h4'><b>Support Center</b></span>\", \"col\": 12}}, {\"id\": \"card_support\", \"type\": \"card\", \"data\": {\"card_name\": \"Support\", \"col\": 4}}, {\"id\": \"card_sales\", \"type\": \"card\", \"data\": {\"card_name\": \"Sales\", \"col\": 4}}, {\"id\": \"card_meetings\", \"type\": \"card\", \"data\": {\"card_name\": \"Meetings\", \"col\": 4}}]",
+	"number_cards": [],
+	"charts": [],
+	"shortcuts": [
+		{
+			"type": "Page",
+			"link_to": "support-dashboard",
+			"label": "Support Dashboard",
+			"color": "Blue",
+			"format": "Open"
+		},
+		{
+			"type": "DocType",
+			"link_to": "Customer",
+			"doc_view": "List",
+			"label": "Customers",
+			"color": "Green",
+			"format": "{} Customers"
+		},
+		{
+			"type": "DocType",
+			"link_to": "Issue",
+			"doc_view": "List",
+			"label": "Issues",
+			"color": "Orange",
+			"format": "{} Open"
+		}
+	],
+	"links": [
+		{
+			"type": "Card Break",
+			"label": "Support"
+		},
+		{
+			"type": "Link",
+			"label": "Support Dashboard",
+			"link_type": "Page",
+			"link_to": "support-dashboard",
+			"onboard": 1
+		},
+		{
+			"type": "Link",
+			"label": "Contacts",
+			"link_type": "DocType",
+			"link_to": "Contact"
+		},
+		{
+			"type": "Link",
+			"label": "Issues",
+			"link_type": "DocType",
+			"link_to": "Issue"
+		},
+		{
+			"type": "Card Break",
+			"label": "Sales"
+		},
+		{
+			"type": "Link",
+			"label": "Customers",
+			"link_type": "DocType",
+			"link_to": "Customer"
+		},
+		{
+			"type": "Link",
+			"label": "Sales Orders",
+			"link_type": "DocType",
+			"link_to": "Sales Order"
+		},
+		{
+			"type": "Card Break",
+			"label": "Meetings"
+		},
+		{
+			"type": "Link",
+			"label": "Meeting Bookings",
+			"link_type": "DocType",
+			"link_to": "MM Meeting Booking"
+		}
+	],
+	"quick_lists": [],
+	"custom_blocks": [],
+	"roles": []
+}
