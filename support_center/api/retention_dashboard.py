@@ -428,7 +428,21 @@ def get_client_retention_detail(customer_id):
                 "avg_order_value": lifetime_value / total_orders if total_orders > 0 else 0,
                 "last_order_date": orders[0].get("transaction_date") if orders else None,
                 "next_renewal_date": next_renewal,
-                "renewal_status": calculate_renewal_status(next_renewal, orders[0].get("transaction_date") if orders else None, getdate(nowdate()))
+                "renewal_status": calculate_renewal_status(next_renewal, orders[0].get("transaction_date") if orders else None, getdate(nowdate())),
+                "priority_score": calculate_priority_score({
+                    "lifetime_value": lifetime_value,
+                    "total_orders": total_orders,
+                    "customer_group": customer.customer_group,
+                    "renewal_status": calculate_renewal_status(next_renewal, orders[0].get("transaction_date") if orders else None, getdate(nowdate())),
+                    "days_until_renewal": calculate_days_until(next_renewal, getdate(nowdate()))
+                }),
+                "priority_level": get_priority_label(calculate_priority_score({
+                    "lifetime_value": lifetime_value,
+                    "total_orders": total_orders,
+                    "customer_group": customer.customer_group,
+                    "renewal_status": calculate_renewal_status(next_renewal, orders[0].get("transaction_date") if orders else None, getdate(nowdate())),
+                    "days_until_renewal": calculate_days_until(next_renewal, getdate(nowdate()))
+                }))
             },
             "product_breakdown": product_breakdown,
             "orders": orders,

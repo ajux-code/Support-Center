@@ -441,28 +441,27 @@ class RetentionDashboard {
 
     /**
      * Adaptive rendering for insights section
-     * Consolidates when both are empty, shows full cards when there's data
+     * Always renders both cards — each card shows its own empty state when needed
      */
     renderInsightsWidgets(renewals, clients) {
-        const hasRenewals = renewals && renewals.length > 0;
-        const priorityClients = clients
-            .filter(c => c.renewal_status === 'overdue' || c.renewal_status === 'due_soon')
-            .slice(0, 5);
-        const hasPriorityActions = priorityClients.length > 0;
-
         const insightsGrid = document.querySelector('.insights-grid');
         if (!insightsGrid) return;
 
-        // If both are empty, show consolidated success state
-        if (!hasRenewals && !hasPriorityActions) {
-            insightsGrid.classList.add('insights-consolidated');
-            this.renderConsolidatedEmptyState(clients);
-        } else {
-            // Show full two-card layout
-            insightsGrid.classList.remove('insights-consolidated');
-            this.renderCompactCalendar(renewals);
-            this.renderPriorityClients(clients);
+        // Remove any previous consolidated state and restore widget cards
+        const existingConsolidated = insightsGrid.querySelector('.consolidated-success');
+        if (existingConsolidated) {
+            existingConsolidated.remove();
         }
+        insightsGrid.classList.remove('insights-consolidated');
+
+        // Show the widget cards (they may have been hidden)
+        insightsGrid.querySelectorAll('.widget-card').forEach(card => {
+            card.style.display = '';
+        });
+
+        // Always render both cards — they handle empty states internally
+        this.renderCompactCalendar(renewals);
+        this.renderPriorityClients(clients);
     }
 
     /**
@@ -1510,16 +1509,17 @@ class RetentionDashboard {
 
             <!-- Quick Actions -->
             <div class="detail-section quick-actions-bar">
-                <button class="btn-action mark-contacted-btn" data-customer-id="${customer.customer_id}" data-customer-name="${this.escapeHtml(customer.customer_name)}">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                    </svg>
-                    Mark as Contacted
-                </button>
                 <div class="last-contact-display" id="last-contact-${customer.customer_id}" style="display: none;">
                     <span class="contact-label">Last contacted:</span>
                     <span class="contact-value"></span>
                 </div>
+                <button class="btn-action mark-contacted-btn" data-customer-id="${customer.customer_id}" data-customer-name="${this.escapeHtml(customer.customer_name)}">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    Mark as Contacted
+                </button>
             </div>
 
             <!-- Actions -->
