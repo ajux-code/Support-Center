@@ -640,8 +640,12 @@ def get_calendar_view_data(year=None, month=None):
     """
     Get renewal data organized for calendar display
     Returns renewals grouped by day with summary stats
+    Optimized with LEFT JOIN to avoid N+1 query problem
     """
     try:
+        import time
+        query_start = time.time()
+
         today = getdate(nowdate())
         if not year:
             year = today.year
@@ -664,7 +668,7 @@ def get_calendar_view_data(year=None, month=None):
         else:
             last_day = datetime(year, month + 1, 1).date() - timedelta(days=1)
 
-        # Get all renewals for the month
+        # Optimized query with LEFT JOIN instead of correlated subquery
         renewals = frappe.db.sql("""
         SELECT
             sub.name as subscription_id,
@@ -672,20 +676,23 @@ def get_calendar_view_data(year=None, month=None):
             c.customer_name,
             sub.end_date as renewal_date,
             sub.status,
-            (
-                SELECT SUM(so.grand_total)
-                FROM `tabSales Order` so
-                WHERE so.customer = sub.party
-                AND so.docstatus = 1
-                AND so.transaction_date >= DATE_SUB(sub.end_date, INTERVAL 1 YEAR)
-            ) as annual_value
+            COALESCE(SUM(so.grand_total), 0) as annual_value
         FROM `tabSubscription` sub
         JOIN `tabCustomer` c ON c.name = sub.party
+        LEFT JOIN `tabSales Order` so ON (
+            so.customer = sub.party
+            AND so.docstatus = 1
+            AND so.transaction_date >= DATE_SUB(sub.end_date, INTERVAL 1 YEAR)
+        )
         WHERE sub.party_type = 'Customer'
         AND sub.status IN ('Active', 'Past Due Date', 'Unpaid')
         AND sub.end_date BETWEEN %(start)s AND %(end)s
+        GROUP BY sub.name, sub.party, c.customer_name, sub.end_date, sub.status
         ORDER BY sub.end_date ASC, annual_value DESC
         """, {"start": str(first_day), "end": str(last_day)}, as_dict=True)
+
+        query_time = time.time() - query_start
+        frappe.logger().info(f"Calendar view query completed in {query_time:.3f}s for {len(renewals)} renewals ({year}-{month})")
 
         # Group by date
         by_date = {}
