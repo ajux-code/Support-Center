@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 support_center.patches.add_search_indexes
 support_center.patches.backfill_customer_links
+support_center.patches.add_retention_dashboard_indexes

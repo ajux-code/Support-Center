@@ -93,7 +93,7 @@ class RetentionDashboard {
             });
         });
 
-        // Search input
+        // Search input - Backend search
         const searchClearBtn = document.getElementById('search-clear-btn');
         if (this.searchInput) {
             this.searchInput.addEventListener('input', (e) => {
@@ -105,19 +105,34 @@ class RetentionDashboard {
                     searchClearBtn.style.display = value ? 'flex' : 'none';
                 }
 
+                // If search is empty, reload original client list
+                if (!value) {
+                    this.clearSearch();
+                    return;
+                }
+
+                // Debounce backend search
                 this.searchTimeout = setTimeout(() => {
-                    this.filterClientsLocally(value);
-                }, 300);
+                    this.performBackendSearch(value);
+                }, 400); // Slightly longer debounce for backend calls
+            });
+
+            // Enter key to search
+            this.searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    clearTimeout(this.searchTimeout);
+                    const value = e.target.value.trim();
+                    if (value) {
+                        this.performBackendSearch(value);
+                    }
+                }
             });
         }
 
         // Search clear button
         if (searchClearBtn) {
             searchClearBtn.addEventListener('click', () => {
-                this.searchInput.value = '';
-                searchClearBtn.style.display = 'none';
-                this.filterClientsLocally('');
-                this.searchInput.focus();
+                this.clearSearch();
             });
         }
 
@@ -153,6 +168,27 @@ class RetentionDashboard {
                 if (supportBtn) {
                     const url = supportBtn.getAttribute('data-support-url');
                     window.location.href = url;
+                    return;
+                }
+
+                const breakdownBtn = e.target.closest('.view-breakdown-btn');
+                if (breakdownBtn) {
+                    e.preventDefault();
+                    const customerId = breakdownBtn.getAttribute('data-customer-id');
+                    if (customerId) {
+                        this.showPriorityBreakdown(customerId);
+                    }
+                    return;
+                }
+
+                const contactBtn = e.target.closest('.mark-contacted-btn');
+                if (contactBtn) {
+                    e.preventDefault();
+                    const customerId = contactBtn.getAttribute('data-customer-id');
+                    const customerName = contactBtn.getAttribute('data-customer-name');
+                    if (customerId) {
+                        this.showContactDialog(customerId, customerName);
+                    }
                     return;
                 }
             });
@@ -378,9 +414,8 @@ class RetentionDashboard {
             this.renderPagination();
             this.renderProductAnalysis(products);
 
-            // Render new widgets
-            this.renderCompactCalendar(compactCalendar);
-            this.renderPriorityClients(clients);
+            // Render insights widgets (adaptive - consolidates when empty)
+            this.renderInsightsWidgets(compactCalendar, clients);
 
             // Render at-risk clients for overview (legacy)
             this.renderAtRiskClients(clients);
@@ -402,6 +437,190 @@ class RetentionDashboard {
         const date = new Date();
         date.setDate(date.getDate() + days);
         return date.toISOString().split('T')[0];
+    }
+
+    /**
+     * Adaptive rendering for insights section
+     * Consolidates when both are empty, shows full cards when there's data
+     */
+    renderInsightsWidgets(renewals, clients) {
+        const hasRenewals = renewals && renewals.length > 0;
+        const priorityClients = clients
+            .filter(c => c.renewal_status === 'overdue' || c.renewal_status === 'due_soon')
+            .slice(0, 5);
+        const hasPriorityActions = priorityClients.length > 0;
+
+        const insightsGrid = document.querySelector('.insights-grid');
+        if (!insightsGrid) return;
+
+        // If both are empty, show consolidated success state
+        if (!hasRenewals && !hasPriorityActions) {
+            insightsGrid.classList.add('insights-consolidated');
+            this.renderConsolidatedEmptyState(clients);
+        } else {
+            // Show full two-card layout
+            insightsGrid.classList.remove('insights-consolidated');
+            this.renderCompactCalendar(renewals);
+            this.renderPriorityClients(clients);
+        }
+    }
+
+    /**
+     * Render consolidated empty state when both widgets are empty
+     * Vercel-style: compact, informative, actionable
+     */
+    renderConsolidatedEmptyState(clients) {
+        // Find next renewal from all clients
+        const nextRenewal = this.findNextRenewal(clients);
+
+        const insightsGrid = document.querySelector('.insights-grid');
+        if (!insightsGrid) return;
+
+        insightsGrid.innerHTML = `
+            <div class="consolidated-success">
+                <div class="success-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </div>
+                <div class="success-content">
+                    <h4>You're all caught up</h4>
+                    <p class="success-details">
+                        No renewals in next 7 days${nextRenewal ? ` • Next: ${this.formatNextRenewal(nextRenewal)}` : ''}
+                    </p>
+                </div>
+                <div class="success-actions">
+                    <button type="button" class="btn-link" id="jump-to-calendar-btn">
+                        View pipeline →
+                    </button>
+                    <button type="button" class="btn-link" id="analytics-nav-btn">
+                        Review analytics →
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Add event listeners using event delegation (more reliable)
+        setTimeout(() => {
+            console.log('Setting up consolidated success button handlers...');
+
+            // Use event delegation on the parent container
+            const successContainer = document.querySelector('.consolidated-success');
+            if (!successContainer) {
+                console.warn('Consolidated success container not found');
+                return;
+            }
+
+            console.log('Found consolidated success container');
+
+            // Attach single delegated listener
+            successContainer.addEventListener('click', (e) => {
+                const target = e.target;
+
+                // Check if click is on or within calendar button
+                const calendarBtn = target.closest('#jump-to-calendar-btn');
+                if (calendarBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('✓ Calendar button clicked - navigating to calendar section');
+
+                    // Navigate to calendar section (same logic as quick-action-card)
+                    const calendarSection = document.getElementById('full-calendar-section');
+                    if (calendarSection) {
+                        // Expand the calendar if it's hidden
+                        if (calendarSection.style.display === 'none') {
+                            calendarSection.style.display = 'block';
+                        }
+                        // Smooth scroll to the section
+                        calendarSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+                        // Optional: scroll to next renewal date if found
+                        if (nextRenewal) {
+                            setTimeout(() => {
+                                const dateElement = document.querySelector(`[data-date="${nextRenewal.renewal_date}"]`);
+                                if (dateElement) {
+                                    dateElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            }, 500);
+                        }
+                    } else {
+                        console.warn('Calendar section not found');
+                    }
+                    return;
+                }
+
+                // Check if click is on or within analytics button
+                const analyticsBtn = target.closest('#analytics-nav-btn');
+                if (analyticsBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('✓ Analytics button clicked - navigating to analytics section');
+
+                    // Navigate to analytics section (same logic as quick-action-card)
+                    const analyticsSection = document.getElementById('analytics-section');
+                    if (analyticsSection) {
+                        // Expand analytics if collapsed
+                        if (analyticsSection.classList.contains('collapsed')) {
+                            analyticsSection.classList.remove('collapsed');
+                        }
+                        // Load charts if not already loaded
+                        if (!this.renewalRateChart) {
+                            this.loadTrendData();
+                        }
+                        // Smooth scroll to the section
+                        analyticsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } else {
+                        console.warn('Analytics section not found');
+                    }
+                    return;
+                }
+            });
+
+            console.log('✓ Button handlers attached successfully');
+        }, 100);
+    }
+
+    /**
+     * Find the next upcoming renewal from all clients
+     */
+    findNextRenewal(clients) {
+        if (!clients || clients.length === 0) return null;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Find clients with future renewal dates
+        const upcomingRenewals = clients
+            .filter(c => c.renewal_date && new Date(c.renewal_date) > today)
+            .sort((a, b) => new Date(a.renewal_date) - new Date(b.renewal_date));
+
+        return upcomingRenewals.length > 0 ? upcomingRenewals[0] : null;
+    }
+
+    /**
+     * Format next renewal info for display
+     */
+    formatNextRenewal(renewal) {
+        if (!renewal) return '';
+
+        const date = new Date(renewal.renewal_date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const daysUntil = Math.ceil((date - today) / (1000 * 60 * 60 * 24));
+
+        const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const customerName = renewal.customer_name || 'Customer';
+
+        return `${dateStr} (${daysUntil} days) • ${this.truncate(customerName, 20)}`;
+    }
+
+    /**
+     * Truncate text with ellipsis
+     */
+    truncate(text, maxLength) {
+        if (!text) return '';
+        return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
     }
 
     renderCompactCalendar(renewals) {
@@ -472,8 +691,14 @@ class RetentionDashboard {
             .sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0))
             .slice(0, 5); // Top 5
 
+        // Hide badge when count is 0, show otherwise
         if (badge) {
-            badge.textContent = priorityClients.length;
+            if (priorityClients.length === 0) {
+                badge.style.display = 'none';
+            } else {
+                badge.style.display = '';
+                badge.textContent = priorityClients.length;
+            }
         }
 
         if (priorityClients.length === 0) {
@@ -837,7 +1062,7 @@ class RetentionDashboard {
         if (clients.length === 0) {
             this.clientsTableBody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="empty-cell">
+                    <td colspan="9" class="empty-cell">
                         <div class="empty-state-small">
                             <p>No clients found${this.currentFilter ? ` with status "${this.currentFilter}"` : ''}.</p>
                         </div>
@@ -917,6 +1142,9 @@ class RetentionDashboard {
                         `<span class="upsell-value">${this.formatCurrency(client.upsell_potential)}</span>`
                         : '<span class="no-upsell">-</span>'}
                 </td>
+                <td class="contact-cell">
+                    ${this.renderLastContact(client)}
+                </td>
                 <td class="actions-cell">
                     <button class="action-btn view-detail-btn"
                             data-customer-id="${this.escapeHtml(client.customer_id)}"
@@ -940,6 +1168,40 @@ class RetentionDashboard {
                 </td>
             </tr>
         `;
+    }
+
+    renderLastContact(client) {
+        if (!client.last_contacted_at) {
+            return '<span class="no-contact">Never</span>';
+        }
+
+        const icon = this.getContactIcon(client.last_contact_type);
+        const timeAgo = this.formatContactTimeAgo(client.last_contact_days_ago);
+
+        return `
+            <div class="contact-info" title="Contacted by ${this.escapeHtml(client.last_contacted_by || 'Unknown')}">
+                ${icon}
+                <span class="contact-time">${timeAgo}</span>
+            </div>
+        `;
+    }
+
+    formatContactTimeAgo(daysAgo) {
+        if (daysAgo === null || daysAgo === undefined) return 'Never';
+
+        if (daysAgo === 0) return 'Today';
+        if (daysAgo === 1) return 'Yesterday';
+        if (daysAgo < 7) return `${daysAgo} days ago`;
+        if (daysAgo < 30) {
+            const weeks = Math.floor(daysAgo / 7);
+            return `${weeks} week${weeks !== 1 ? 's' : ''} ago`;
+        }
+        if (daysAgo < 365) {
+            const months = Math.floor(daysAgo / 30);
+            return `${months} month${months !== 1 ? 's' : ''} ago`;
+        }
+        const years = Math.floor(daysAgo / 365);
+        return `${years} year${years !== 1 ? 's' : ''} ago`;
     }
 
     renderPriorityScore(score, level) {
@@ -1054,6 +1316,9 @@ class RetentionDashboard {
 
             this.renderClientDetailModal(detail);
 
+            // Load last contact info
+            this.loadLastContact(customerId);
+
             // Re-focus after content loads
             this.setModalFocus();
 
@@ -1161,6 +1426,22 @@ class RetentionDashboard {
                 </div>
             </div>
 
+            <!-- Priority Score Breakdown -->
+            <div class="detail-section priority-breakdown-section">
+                <div class="section-header-inline">
+                    <h3>Priority Score: <span class="priority-badge priority-${metrics.priority_level}">${metrics.priority_score}/100</span></h3>
+                    <button class="btn-link view-breakdown-btn" data-customer-id="${customer.customer_id}">
+                        View Breakdown →
+                    </button>
+                </div>
+                <div class="priority-breakdown-container" style="display: none;">
+                    <div class="breakdown-loading">
+                        <div class="loading-spinner"></div>
+                        <span>Loading breakdown...</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Product Breakdown -->
             ${Object.keys(detail.product_breakdown).length > 0 ? `
                 <div class="detail-section">
@@ -1227,6 +1508,20 @@ class RetentionDashboard {
                 </div>
             ` : ''}
 
+            <!-- Quick Actions -->
+            <div class="detail-section quick-actions-bar">
+                <button class="btn-action mark-contacted-btn" data-customer-id="${customer.customer_id}" data-customer-name="${this.escapeHtml(customer.customer_name)}">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                    </svg>
+                    Mark as Contacted
+                </button>
+                <div class="last-contact-display" id="last-contact-${customer.customer_id}" style="display: none;">
+                    <span class="contact-label">Last contacted:</span>
+                    <span class="contact-value"></span>
+                </div>
+            </div>
+
             <!-- Actions -->
             <div class="detail-actions">
                 <button class="btn-secondary" data-customer-url="/app/customer/${customer.customer_id}">
@@ -1262,7 +1557,482 @@ class RetentionDashboard {
         }
     }
 
+    async showPriorityBreakdown(customerId) {
+        const container = document.querySelector('.priority-breakdown-container');
+        const btn = document.querySelector('.view-breakdown-btn');
+
+        if (!container) return;
+
+        // Toggle visibility
+        const isHidden = container.style.display === 'none';
+
+        if (!isHidden) {
+            // Collapse
+            container.style.display = 'none';
+            if (btn) btn.textContent = 'View Breakdown →';
+            return;
+        }
+
+        // Expand and load
+        container.style.display = 'block';
+        if (btn) btn.textContent = 'Hide Breakdown ↑';
+
+        // Show loading if not already loaded
+        if (!container.dataset.loaded) {
+            container.innerHTML = `
+                <div class="breakdown-loading">
+                    <div class="loading-spinner"></div>
+                    <span>Loading breakdown...</span>
+                </div>
+            `;
+
+            try {
+                const breakdown = await this.apiCall('support_center.api.retention_dashboard.get_customer_priority_breakdown', {
+                    customer_id: customerId
+                });
+
+                this.renderPriorityBreakdown(breakdown);
+                container.dataset.loaded = 'true';
+
+            } catch (error) {
+                console.error('Failed to load priority breakdown:', error);
+                container.innerHTML = `
+                    <div class="error-state-small">
+                        <p>Failed to load priority breakdown.</p>
+                        <button class="btn-link" onclick="this.closest('.priority-breakdown-container').dataset.loaded = ''; this.closest('.priority-breakdown-section').querySelector('.view-breakdown-btn').click();">
+                            Retry
+                        </button>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    renderPriorityBreakdown(breakdown) {
+        const container = document.querySelector('.priority-breakdown-container');
+        if (!container) return;
+
+        const getIconSvg = (iconName) => {
+            const icons = {
+                'dollar-sign': '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="6" x2="12" y2="18"></line><line x1="9" y1="9" x2="9" y2="9"></line><line x1="15" y1="15" x2="15" y2="15"></line>',
+                'clock': '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+                'award': '<circle cx="12" cy="8" r="7"></circle><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>',
+                'activity': '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>'
+            };
+            return icons[iconName] || icons['activity'];
+        };
+
+        const getComponentColor = (name) => {
+            const colors = {
+                'Revenue at Risk': '#16a34a',
+                'Renewal Urgency': '#dc2626',
+                'Customer Tier': '#2563eb',
+                'Engagement': '#ca8a04'
+            };
+            return colors[name] || '#737373';
+        };
+
+        container.innerHTML = `
+            <div class="priority-breakdown-content">
+                <p class="breakdown-intro">
+                    This score prioritizes customers who need attention. Higher scores indicate higher priority.
+                </p>
+
+                <div class="breakdown-components">
+                    ${breakdown.components.map(component => `
+                        <div class="breakdown-component">
+                            <div class="component-header">
+                                <div class="component-title">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: ${getComponentColor(component.name)}">
+                                        ${getIconSvg(component.icon)}
+                                    </svg>
+                                    <span class="component-name">${component.name}</span>
+                                </div>
+                                <div class="component-score">
+                                    <strong>${component.score}</strong>
+                                    <span class="score-max">/ ${component.max_score}</span>
+                                </div>
+                            </div>
+
+                            <div class="component-progress">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: ${component.percentage}%; background-color: ${getComponentColor(component.name)}"></div>
+                                </div>
+                                <span class="progress-percentage">${Math.round(component.percentage)}%</span>
+                            </div>
+
+                            <div class="component-details">
+                                <span class="component-tier">${component.tier}</span>
+                                <span class="component-explanation">${component.explanation}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div class="breakdown-summary">
+                    <div class="summary-row">
+                        <span class="summary-label">Total Priority Score</span>
+                        <span class="summary-value">
+                            <strong>${breakdown.total_score}</strong> / ${breakdown.max_possible_score}
+                            <span class="priority-badge priority-${breakdown.priority_level}">${breakdown.priority_level}</span>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="breakdown-formula">
+                    <strong>Formula:</strong> Revenue (40%) + Urgency (35%) + Tier (15%) + Engagement (10%)
+                </div>
+            </div>
+        `;
+    }
+
+    showContactDialog(customerId, customerName) {
+        // Create a simple dialog to select contact type
+        const dialogHtml = `
+            <div class="contact-dialog-overlay" id="contact-dialog">
+                <div class="contact-dialog">
+                    <div class="contact-dialog-header">
+                        <h3>Log Contact with ${this.escapeHtml(customerName)}</h3>
+                        <button class="contact-dialog-close" onclick="document.getElementById('contact-dialog').remove()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="contact-dialog-body">
+                        <label class="contact-label">Contact Type:</label>
+                        <div class="contact-type-buttons">
+                            <button class="contact-type-btn" data-type="call">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                                </svg>
+                                Phone Call
+                            </button>
+                            <button class="contact-type-btn" data-type="email">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                    <polyline points="22,6 12,13 2,6"></polyline>
+                                </svg>
+                                Email
+                            </button>
+                            <button class="contact-type-btn" data-type="meeting">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                                </svg>
+                                Meeting
+                            </button>
+                            <button class="contact-type-btn" data-type="other">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                </svg>
+                                Other
+                            </button>
+                        </div>
+
+                        <label class="contact-label" style="margin-top: 1rem;">Notes (optional):</label>
+                        <textarea id="contact-notes" class="contact-notes" placeholder="Add notes about the interaction..." rows="3"></textarea>
+                    </div>
+                    <div class="contact-dialog-footer">
+                        <button class="btn-secondary" onclick="document.getElementById('contact-dialog').remove()">
+                            Cancel
+                        </button>
+                        <button class="btn-primary" id="contact-submit-btn" disabled>
+                            Log Contact
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Add to DOM
+        document.body.insertAdjacentHTML('beforeend', dialogHtml);
+
+        const dialog = document.getElementById('contact-dialog');
+        let selectedType = null;
+
+        // Handle contact type selection
+        dialog.querySelectorAll('.contact-type-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                dialog.querySelectorAll('.contact-type-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                selectedType = btn.getAttribute('data-type');
+                document.getElementById('contact-submit-btn').disabled = false;
+            });
+        });
+
+        // Handle submit
+        document.getElementById('contact-submit-btn').addEventListener('click', () => {
+            if (!selectedType) return;
+
+            const notes = document.getElementById('contact-notes').value.trim();
+            this.markCustomerContacted(customerId, customerName, selectedType, notes);
+            dialog.remove();
+        });
+
+        // Close on backdrop click
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) {
+                dialog.remove();
+            }
+        });
+    }
+
+    async markCustomerContacted(customerId, customerName, contactType, notes) {
+        try {
+            // Show loading state
+            this.showToast('Logging contact...', 'info');
+
+            const response = await this.apiCall('support_center.api.retention_dashboard.mark_customer_contacted', {
+                customer_id: customerId,
+                contact_type: contactType,
+                notes: notes || null
+            });
+
+            if (response && response.success) {
+                // Show success message
+                this.showToast(`✓ Logged ${contactType} with ${customerName}`, 'success');
+
+                // Update last contact display
+                this.updateLastContactDisplay(customerId, response);
+
+                // Optionally refresh client list (commented out to avoid disrupting user flow)
+                // this.loadClients();
+            }
+
+        } catch (error) {
+            console.error('Failed to log contact:', error);
+            this.showToast('Failed to log contact. Please try again.', 'error');
+        }
+    }
+
+    updateLastContactDisplay(customerId, contactInfo) {
+        const displayEl = document.getElementById(`last-contact-${customerId}`);
+        if (!displayEl) return;
+
+        const valueEl = displayEl.querySelector('.contact-value');
+        if (!valueEl) return;
+
+        const timeAgo = this.formatRelativeTime(contactInfo.contacted_at);
+        const icon = this.getContactIcon(contactInfo.contact_type);
+
+        valueEl.innerHTML = `
+            ${icon}
+            <strong>${timeAgo}</strong> by ${this.escapeHtml(contactInfo.contacted_by)}
+        `;
+
+        displayEl.style.display = 'flex';
+
+        // Add animation
+        displayEl.classList.add('contact-updated');
+        setTimeout(() => displayEl.classList.remove('contact-updated'), 2000);
+    }
+
+    async loadLastContact(customerId) {
+        try {
+            const contactInfo = await this.apiCall('support_center.api.retention_dashboard.get_customer_last_contact', {
+                customer_id: customerId
+            });
+
+            if (contactInfo && contactInfo.contacted_at) {
+                this.updateLastContactDisplay(customerId, contactInfo);
+            }
+        } catch (error) {
+            console.error('Failed to load last contact:', error);
+            // Silent fail - not critical
+        }
+    }
+
+    getContactIcon(contactType) {
+        const icons = {
+            'call': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; margin-right: 0.25rem;"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>',
+            'email': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; margin-right: 0.25rem;"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>',
+            'meeting': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: inline; margin-right: 0.25rem;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line></svg>',
+            'other': ''
+        };
+        return icons[contactType] || '';
+    }
+
+    formatRelativeTime(timestamp) {
+        const now = new Date();
+        const then = new Date(timestamp);
+        const diffMs = now - then;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+        if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+        if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+        return this.formatDate(timestamp);
+    }
+
+    async performBackendSearch(query) {
+        // Validate query length
+        if (query.length < 2) {
+            this.showToast('Please enter at least 2 characters to search', 'info');
+            return;
+        }
+
+        // Show loading state
+        this.showSearchLoading();
+
+        try {
+            const response = await this.apiCall('support_center.api.retention_dashboard.search_customers', {
+                query: query,
+                limit: 100
+            });
+
+            if (!response || !response.customers) {
+                throw new Error('Invalid response from server');
+            }
+
+            const { customers, count, has_more } = response;
+
+            if (count === 0) {
+                this.showSearchEmpty(query);
+                return;
+            }
+
+            // Update UI with search results
+            this.renderClients(customers);
+            this.showSearchResultsCount(count, query, has_more);
+
+            // Hide pagination during search
+            const pagination = document.getElementById('clients-pagination');
+            if (pagination) {
+                pagination.style.display = 'none';
+            }
+
+        } catch (error) {
+            console.error('Search failed:', error);
+            this.showToast('Search failed. Please try again.', 'error');
+            this.clearSearch();
+        }
+    }
+
+    clearSearch() {
+        // Reset search input
+        if (this.searchInput) {
+            this.searchInput.value = '';
+        }
+
+        // Hide clear button
+        const searchClearBtn = document.getElementById('search-clear-btn');
+        if (searchClearBtn) {
+            searchClearBtn.style.display = 'none';
+        }
+
+        // Clear search results header
+        this.clearSearchResultsCount();
+
+        // Reload original client list
+        this.loadClients(true);
+
+        // Focus search input
+        if (this.searchInput) {
+            this.searchInput.focus();
+        }
+    }
+
+    showSearchLoading() {
+        if (!this.clientsTableBody) return;
+
+        this.clientsTableBody.innerHTML = `
+            <tr>
+                <td colspan="9" class="loading-cell">
+                    <div class="loading-spinner"></div>
+                    <span>Searching across all customers...</span>
+                </td>
+            </tr>
+        `;
+    }
+
+    showSearchEmpty(query) {
+        if (!this.clientsTableBody) return;
+
+        this.clientsTableBody.innerHTML = `
+            <tr>
+                <td colspan="8" class="empty-cell">
+                    <div class="empty-state-small">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color: var(--muted); margin: 0 auto 1rem;">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <h3 style="margin: 0 0 0.5rem; color: var(--text);">No customers found</h3>
+                        <p style="margin: 0; color: var(--muted); font-size: var(--text-sm);">
+                            No customers matching "<strong>${this.escapeHtml(query)}</strong>"
+                        </p>
+                        <p style="margin: 0.5rem 0 0; color: var(--muted-light); font-size: var(--text-xs);">
+                            Try searching by name, email, phone, or customer ID
+                        </p>
+                        <button class="btn-secondary" onclick="document.getElementById('client-search').value = ''; document.getElementById('client-search').dispatchEvent(new Event('input'));" style="margin-top: 1rem;">
+                            Clear Search
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+
+        this.showSearchResultsCount(0, query, false);
+    }
+
+    showSearchResultsCount(count, query, hasMore) {
+        const sectionHeader = document.querySelector('.clients-section .section-header h2');
+        if (!sectionHeader) return;
+
+        // Remove any existing search badge
+        const existingBadge = sectionHeader.querySelector('.search-results-badge');
+        if (existingBadge) {
+            existingBadge.remove();
+        }
+
+        // Create new search results badge
+        const badge = document.createElement('span');
+        badge.className = 'search-results-badge';
+        badge.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 0.25rem;">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            ${count} result${count !== 1 ? 's' : ''} for "${this.escapeHtml(query)}"
+            ${hasMore ? ' <span style="color: var(--warning);">(showing first 100)</span>' : ''}
+            <button class="search-clear-inline" onclick="document.querySelector('.retention-dashboard').querySelector('#client-search').value = ''; document.querySelector('.retention-dashboard').querySelector('#client-search').dispatchEvent(new Event('input'));" title="Clear search">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        `;
+
+        sectionHeader.appendChild(badge);
+    }
+
+    clearSearchResultsCount() {
+        const sectionHeader = document.querySelector('.clients-section .section-header h2');
+        if (!sectionHeader) return;
+
+        const existingBadge = sectionHeader.querySelector('.search-results-badge');
+        if (existingBadge) {
+            existingBadge.remove();
+        }
+
+        // Show pagination again
+        const pagination = document.getElementById('clients-pagination');
+        if (pagination) {
+            pagination.style.display = 'block';
+        }
+    }
+
     filterClientsLocally(query) {
+        // DEPRECATED: This method is no longer used (replaced by performBackendSearch)
+        // Kept for backwards compatibility
         if (!query) {
             this.renderClients(this.clients);
             return;
