@@ -142,6 +142,7 @@ def get_dashboard_kpis():
 def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WINDOW, limit=50, offset=0):
     """
     Get list of clients segmented by renewal status
+    Optimized with LEFT JOINs to avoid N+1 query problem
 
     Args:
         status_filter: 'overdue', 'due_soon', 'active', or None for all
@@ -158,6 +159,9 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
         - product_summary
     """
     try:
+        import time
+        query_start = time.time()
+
         # Validate inputs
         status_filter = validate_status_filter(status_filter)
         days_range = validate_days_range(days_range)
@@ -166,7 +170,8 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
         today = getdate(nowdate())
         due_soon_date = add_days(today, cint(days_range))
 
-        # Base query to get customers with their order history
+        # Optimized query with LEFT JOINs to avoid N+1 problem
+        # Uses derived tables to pre-aggregate data per customer
         customers = frappe.db.sql("""
         SELECT
             c.name as customer_id,
@@ -176,71 +181,53 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
             c.customer_group,
             c.territory,
             c.creation as customer_since,
-            (
-                SELECT MAX(so.transaction_date)
-                FROM `tabSales Order` so
-                WHERE so.customer = c.name
-                AND so.docstatus = 1
-            ) as last_order_date,
-            (
-                SELECT SUM(so.grand_total)
-                FROM `tabSales Order` so
-                WHERE so.customer = c.name
-                AND so.docstatus = 1
-            ) as lifetime_value,
-            (
-                SELECT COUNT(*)
-                FROM `tabSales Order` so
-                WHERE so.customer = c.name
-                AND so.docstatus = 1
-            ) as total_orders,
-            (
-                SELECT GROUP_CONCAT(DISTINCT so.custom_product)
-                FROM `tabSales Order` so
-                WHERE so.customer = c.name
-                AND so.docstatus = 1
-                AND so.custom_product IS NOT NULL
-                AND so.custom_product != ''
-            ) as products_purchased,
-            (
-                SELECT MIN(sub.end_date)
-                FROM `tabSubscription` sub
-                WHERE sub.party_type = 'Customer'
-                AND sub.party = c.name
-                AND sub.status IN ('Active', 'Past Due Date', 'Unpaid')
-            ) as next_renewal_date,
-            (
-                SELECT creation
-                FROM `tabComment` com
-                WHERE com.reference_doctype = 'Customer'
-                AND com.reference_name = c.name
-                AND com.content LIKE '%%Retention Outreach%%'
-                ORDER BY creation DESC
-                LIMIT 1
-            ) as last_contacted_at,
-            (
-                SELECT comment_by
-                FROM `tabComment` com
-                WHERE com.reference_doctype = 'Customer'
-                AND com.reference_name = c.name
-                AND com.content LIKE '%%Retention Outreach%%'
-                ORDER BY creation DESC
-                LIMIT 1
-            ) as last_contacted_by,
-            (
-                SELECT content
-                FROM `tabComment` com
-                WHERE com.reference_doctype = 'Customer'
-                AND com.reference_name = c.name
-                AND com.content LIKE '%%Retention Outreach%%'
-                ORDER BY creation DESC
-                LIMIT 1
-            ) as last_contact_content
+            order_data.last_order_date,
+            COALESCE(order_data.lifetime_value, 0) as lifetime_value,
+            COALESCE(order_data.total_orders, 0) as total_orders,
+            order_data.products_purchased,
+            sub_data.next_renewal_date,
+            contact_data.last_contacted_at,
+            contact_data.last_contacted_by,
+            contact_data.last_contact_content
         FROM `tabCustomer` c
+        LEFT JOIN (
+            SELECT
+                so.customer,
+                MAX(so.transaction_date) as last_order_date,
+                SUM(so.grand_total) as lifetime_value,
+                COUNT(*) as total_orders,
+                GROUP_CONCAT(DISTINCT so.custom_product) as products_purchased
+            FROM `tabSales Order` so
+            WHERE so.docstatus = 1
+            GROUP BY so.customer
+        ) as order_data ON order_data.customer = c.name
+        LEFT JOIN (
+            SELECT
+                sub.party as customer,
+                MIN(sub.end_date) as next_renewal_date
+            FROM `tabSubscription` sub
+            WHERE sub.party_type = 'Customer'
+            AND sub.status IN ('Active', 'Past Due Date', 'Unpaid')
+            GROUP BY sub.party
+        ) as sub_data ON sub_data.customer = c.name
+        LEFT JOIN (
+            SELECT
+                com.reference_name as customer,
+                MAX(com.creation) as last_contacted_at,
+                SUBSTRING_INDEX(GROUP_CONCAT(com.comment_by ORDER BY com.creation DESC), ',', 1) as last_contacted_by,
+                SUBSTRING_INDEX(GROUP_CONCAT(com.content ORDER BY com.creation DESC), ',', 1) as last_contact_content
+            FROM `tabComment` com
+            WHERE com.reference_doctype = 'Customer'
+            AND com.content LIKE '%%Retention Outreach%%'
+            GROUP BY com.reference_name
+        ) as contact_data ON contact_data.customer = c.name
         WHERE c.disabled = 0
-        ORDER BY last_order_date DESC
+        ORDER BY order_data.last_order_date DESC
         LIMIT %(limit)s OFFSET %(offset)s
         """, {"limit": cint(limit), "offset": cint(offset)}, as_dict=True)
+
+        query_time = time.time() - query_start
+        frappe.logger().info(f"Client list query completed in {query_time:.3f}s for {len(customers)} customers (filter: {status_filter})")
 
         # Process and categorize each customer
         result = []
@@ -468,8 +455,12 @@ def get_client_retention_detail(customer_id):
 def get_renewal_calendar(start_date=None, end_date=None):
     """
     Get renewals organized by date for calendar view
+    Optimized with LEFT JOIN to avoid N+1 query problem
     """
     try:
+        import time
+        query_start = time.time()
+
         # Set defaults if not provided
         if not start_date:
             start_date = nowdate()
@@ -479,6 +470,7 @@ def get_renewal_calendar(start_date=None, end_date=None):
         # Validate date range
         start_date, end_date = validate_date_range(start_date, end_date)
 
+        # Optimized query with LEFT JOIN instead of correlated subquery
         renewals = frappe.db.sql("""
         SELECT
             sub.name as subscription_id,
@@ -486,20 +478,23 @@ def get_renewal_calendar(start_date=None, end_date=None):
             c.customer_name,
             sub.end_date as renewal_date,
             sub.status,
-            (
-                SELECT SUM(so.grand_total)
-                FROM `tabSales Order` so
-                WHERE so.customer = sub.party
-                AND so.docstatus = 1
-                AND so.transaction_date >= DATE_SUB(sub.end_date, INTERVAL 1 YEAR)
-            ) as annual_value
+            COALESCE(SUM(so.grand_total), 0) as annual_value
         FROM `tabSubscription` sub
         JOIN `tabCustomer` c ON c.name = sub.party
+        LEFT JOIN `tabSales Order` so ON (
+            so.customer = sub.party
+            AND so.docstatus = 1
+            AND so.transaction_date >= DATE_SUB(sub.end_date, INTERVAL 1 YEAR)
+        )
         WHERE sub.party_type = 'Customer'
         AND sub.status IN ('Active', 'Past Due Date', 'Unpaid')
         AND sub.end_date BETWEEN %(start)s AND %(end)s
+        GROUP BY sub.name, sub.party, c.customer_name, sub.end_date, sub.status
         ORDER BY sub.end_date ASC
     """, {"start": start_date, "end": end_date}, as_dict=True)
+
+        query_time = time.time() - query_start
+        frappe.logger().info(f"Renewal calendar query completed in {query_time:.3f}s for {len(renewals)} renewals")
 
         # Add risk level based on annual value
         for renewal in renewals:

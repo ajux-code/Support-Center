@@ -2400,13 +2400,51 @@ class RetentionDashboard {
             monthLabel.textContent = 'Loading...';
         }
 
+        // Generate cache key
+        const cacheKey = `${this.calendarYear}-${this.calendarMonth}`;
+
+        // Check cache first
+        if (this.calendarCache && this.calendarCache[cacheKey]) {
+            this.renderCalendar(this.calendarCache[cacheKey]);
+            return;
+        }
+
+        // Cancel previous request if still pending
+        if (this.pendingCalendarRequest) {
+            this.pendingCalendarRequest.cancelled = true;
+        }
+
+        // Create new request tracker
+        const requestTracker = { cancelled: false };
+        this.pendingCalendarRequest = requestTracker;
+
         try {
             const calendarData = await this.apiCall('support_center.api.retention_dashboard.get_calendar_view_data', {
                 year: this.calendarYear,
                 month: this.calendarMonth
             });
+
+            // Check if request was cancelled (race condition protection)
+            if (requestTracker.cancelled) {
+                return;
+            }
+
+            // Cache the result
+            if (!this.calendarCache) {
+                this.calendarCache = {};
+            }
+            this.calendarCache[cacheKey] = calendarData;
+
+            // Limit cache size to last 6 months
+            const cacheKeys = Object.keys(this.calendarCache);
+            if (cacheKeys.length > 6) {
+                delete this.calendarCache[cacheKeys[0]];
+            }
+
             this.renderCalendar(calendarData);
         } catch (error) {
+            if (requestTracker.cancelled) return;
+
             console.error('Failed to load calendar data:', error);
             if (calendarGrid) {
                 calendarGrid.innerHTML = `
@@ -2414,6 +2452,10 @@ class RetentionDashboard {
                         <span>Failed to load calendar. Please try again.</span>
                     </div>
                 `;
+            }
+        } finally {
+            if (this.pendingCalendarRequest === requestTracker) {
+                this.pendingCalendarRequest = null;
             }
         }
     }
@@ -2433,6 +2475,11 @@ class RetentionDashboard {
 
         if (!calendarGrid) return;
 
+        // Remove old event listener if exists
+        if (this.calendarClickHandler) {
+            calendarGrid.removeEventListener('click', this.calendarClickHandler);
+        }
+
         const today = new Date();
         const todayStr = today.toISOString().split('T')[0];
         const firstDay = new Date(data.first_day);
@@ -2442,11 +2489,13 @@ class RetentionDashboard {
         let startDay = firstDay.getDay();
         startDay = startDay === 0 ? 6 : startDay - 1; // Convert to Monday = 0
 
-        let html = '';
+        // Use DocumentFragment for efficient DOM construction
+        const fragment = document.createDocumentFragment();
+        const htmlParts = []; // Use array for faster string building
 
         // Add empty cells for days before the first of the month
         for (let i = 0; i < startDay; i++) {
-            html += '<div class="calendar-day calendar-day-empty"></div>';
+            htmlParts.push('<div class="calendar-day calendar-day-empty"></div>');
         }
 
         // Add days of the month
@@ -2456,72 +2505,78 @@ class RetentionDashboard {
             const isToday = dateStr === todayStr;
             const isPast = new Date(dateStr) < new Date(todayStr);
 
-            let dayClass = 'calendar-day';
-            if (isToday) dayClass += ' calendar-day-today';
-            if (isPast) dayClass += ' calendar-day-past';
-            if (dayData && dayData.count > 0) dayClass += ' calendar-day-has-renewals';
+            const dayClasses = ['calendar-day'];
+            if (isToday) dayClasses.push('calendar-day-today');
+            if (isPast) dayClasses.push('calendar-day-past');
+            if (dayData && dayData.count > 0) dayClasses.push('calendar-day-has-renewals');
 
-            html += `<div class="${dayClass}" data-date="${dateStr}">`;
-            html += `<span class="calendar-day-number">${day}</span>`;
+            htmlParts.push(`<div class="${dayClasses.join(' ')}" data-date="${dateStr}">`);
+            htmlParts.push(`<span class="calendar-day-number">${day}</span>`);
 
             if (dayData && dayData.count > 0) {
-                html += '<div class="calendar-day-renewals">';
+                htmlParts.push('<div class="calendar-day-renewals">');
 
                 // Show up to 3 renewals with dots
                 const renewalsToShow = dayData.renewals.slice(0, 3);
                 renewalsToShow.forEach(renewal => {
                     const riskClass = `renewal-${renewal.risk_level}`;
-                    html += `
-                        <div class="calendar-renewal ${riskClass}"
-                             data-customer-id="${this.escapeHtml(renewal.customer_id)}"
-                             title="${this.escapeHtml(renewal.customer_name)} - ${this.formatCurrency(renewal.annual_value)}">
-                            <span class="renewal-dot"></span>
-                            <span class="renewal-name">${this.escapeHtml(this.truncate(renewal.customer_name, 12))}</span>
-                        </div>
-                    `;
+                    htmlParts.push(
+                        `<div class="calendar-renewal ${riskClass}" data-customer-id="${this.escapeHtml(renewal.customer_id)}" title="${this.escapeHtml(renewal.customer_name)} - ${this.formatCurrency(renewal.annual_value)}">`,
+                        '<span class="renewal-dot"></span>',
+                        `<span class="renewal-name">${this.escapeHtml(this.truncate(renewal.customer_name, 12))}</span>`,
+                        '</div>'
+                    );
                 });
 
                 // Show "+X more" if there are more renewals
                 if (dayData.count > 3) {
-                    html += `<div class="calendar-more">+${dayData.count - 3} more</div>`;
+                    htmlParts.push(`<div class="calendar-more">+${dayData.count - 3} more</div>`);
                 }
 
-                html += '</div>';
+                htmlParts.push('</div>');
             }
 
-            html += '</div>';
+            htmlParts.push('</div>');
         }
 
         // Add empty cells to complete the last week
         const totalCells = startDay + daysInMonth;
         const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
         for (let i = 0; i < remainingCells; i++) {
-            html += '<div class="calendar-day calendar-day-empty"></div>';
+            htmlParts.push('<div class="calendar-day calendar-day-empty"></div>');
         }
 
-        calendarGrid.innerHTML = html;
+        // Single DOM write with array.join (faster than string concatenation)
+        calendarGrid.innerHTML = htmlParts.join('');
 
-        // Add click handlers for renewals
-        calendarGrid.querySelectorAll('.calendar-renewal').forEach(el => {
-            el.addEventListener('click', (e) => {
+        // Store renewals data for event delegation
+        this.calendarData = data;
+
+        // Event delegation - single listener for entire calendar
+        this.calendarClickHandler = (e) => {
+            // Handle renewal click
+            const renewalEl = e.target.closest('.calendar-renewal');
+            if (renewalEl) {
                 e.stopPropagation();
-                const customerId = el.dataset.customerId;
+                const customerId = renewalEl.dataset.customerId;
                 if (customerId) {
                     this.showClientDetail(customerId);
                 }
-            });
-        });
+                return;
+            }
 
-        // Add click handlers for days with renewals
-        calendarGrid.querySelectorAll('.calendar-day-has-renewals').forEach(el => {
-            el.addEventListener('click', (e) => {
-                if (e.target.classList.contains('calendar-renewal') || e.target.closest('.calendar-renewal')) {
-                    return; // Don't trigger day click if clicking on a renewal
+            // Handle day click
+            const dayEl = e.target.closest('.calendar-day-has-renewals');
+            if (dayEl && !e.target.closest('.calendar-renewal')) {
+                const dateStr = dayEl.dataset.date;
+                const dayData = data.renewals_by_date[dateStr];
+                if (dayData) {
+                    this.showDayDetail(dateStr, dayData);
                 }
-                const dateStr = el.dataset.date;
-                this.showDayDetail(dateStr, data.renewals_by_date[dateStr]);
-            });
-        });
+            }
+        };
+
+        calendarGrid.addEventListener('click', this.calendarClickHandler);
     }
 
     showDayDetail(dateStr, dayData) {
