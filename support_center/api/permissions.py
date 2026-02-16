@@ -1,9 +1,13 @@
 """
-Permission helpers for Support Dashboard
+Permission helpers for Support Dashboard and Retention Dashboard
+
+This module provides role-based access control (RBAC) for the support center app,
+including the retention dashboard which requires specific role checks.
 """
 
 import frappe
 from frappe import _
+from functools import wraps
 
 
 def has_app_permission():
@@ -109,3 +113,178 @@ def require_login():
     """
     if frappe.session.user == "Guest":
         frappe.throw(_("You must be logged in to access this resource"), frappe.PermissionError)
+
+
+# ============================================================================
+# RETENTION DASHBOARD PERMISSIONS
+# ============================================================================
+
+# Define roles that have access to retention dashboard
+RETENTION_ACCESS_ROLES = [
+    "Sales Manager",
+    "System Manager",
+    "Accounts Manager"
+]
+
+
+def has_retention_access(user=None):
+    """
+    Check if a user has access to the retention dashboard.
+
+    Args:
+        user (str, optional): Username to check. If None, checks current user.
+
+    Returns:
+        bool: True if user has any of the required roles, False otherwise.
+
+    Example:
+        >>> if has_retention_access():
+        >>>     return get_sensitive_data()
+        >>> else:
+        >>>     frappe.throw("Access denied")
+    """
+    if not user:
+        user = frappe.session.user
+
+    # System administrators always have access
+    if user == "Administrator":
+        return True
+
+    # Check if user has any of the required roles
+    user_roles = frappe.get_roles(user)
+    return any(role in user_roles for role in RETENTION_ACCESS_ROLES)
+
+
+def require_retention_access(fn):
+    """
+    Decorator to enforce retention dashboard access permissions.
+
+    This decorator should be applied to all @frappe.whitelist() functions
+    that expose retention dashboard data.
+
+    Args:
+        fn: The function to wrap with permission checking.
+
+    Returns:
+        function: Wrapped function that checks permissions before execution.
+
+    Raises:
+        frappe.PermissionError: If user does not have required permissions.
+
+    Example:
+        @frappe.whitelist()
+        @require_retention_access
+        def get_dashboard_kpis():
+            return {"kpis": "data"}
+    """
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not has_retention_access():
+            log_access_denial(frappe.session.user, fn.__name__)
+            frappe.throw(
+                _("You do not have permission to access the Retention Dashboard. Required roles: {0}").format(
+                    ", ".join(RETENTION_ACCESS_ROLES)
+                ),
+                frappe.PermissionError
+            )
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def can_access_customer_retention(customer_name, user=None):
+    """
+    Check if a user has permission to access a specific customer's retention data.
+
+    This function checks both:
+    1. General retention dashboard access
+    2. Specific customer-level permissions in ERPNext
+
+    Args:
+        customer_name (str): Name of the customer document.
+        user (str, optional): Username to check. If None, checks current user.
+
+    Returns:
+        bool: True if user can access the customer, False otherwise.
+
+    Example:
+        >>> if can_access_customer_retention("ABC Corp"):
+        >>>     return get_customer_details("ABC Corp")
+    """
+    if not user:
+        user = frappe.session.user
+
+    # First check if user has retention dashboard access
+    if not has_retention_access(user):
+        return False
+
+    # Then check ERPNext customer-level permissions
+    try:
+        return frappe.has_permission("Customer", "read", customer_name, user=user)
+    except Exception:
+        return False
+
+
+def log_access_denial(user, endpoint):
+    """
+    Log security events when access is denied.
+
+    This creates an audit trail for security monitoring and compliance.
+
+    Args:
+        user (str): Username that was denied access.
+        endpoint (str): API endpoint or function name that was accessed.
+    """
+    try:
+        frappe.log_error(
+            title=_("Retention Dashboard - Access Denied"),
+            message=_(
+                "User: {0}\n"
+                "Endpoint: {1}\n"
+                "IP Address: {2}\n"
+                "User Agent: {3}"
+            ).format(
+                user,
+                endpoint,
+                frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else "Unknown",
+                frappe.request.headers.get('User-Agent', 'Unknown') if frappe.request else "Unknown"
+            )
+        )
+    except Exception:
+        # Silently fail if logging fails - don't break the permission check
+        pass
+
+
+def log_security_event(event_type, details, user=None):
+    """
+    Log security-related events for audit trail.
+
+    Args:
+        event_type (str): Type of event (e.g., "access_granted", "data_export", "bulk_action").
+        details (str): Detailed description of the event.
+        user (str, optional): Username. If None, uses current user.
+
+    Example:
+        >>> log_security_event("data_export", "Exported 50 customer records")
+    """
+    if not user:
+        user = frappe.session.user
+
+    try:
+        frappe.log_error(
+            title=_("Retention Dashboard - {0}").format(event_type),
+            message=_(
+                "User: {0}\n"
+                "Event: {1}\n"
+                "Details: {2}\n"
+                "Timestamp: {3}\n"
+                "IP Address: {4}"
+            ).format(
+                user,
+                event_type,
+                details,
+                frappe.utils.now(),
+                frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else "Unknown"
+            )
+        )
+    except Exception:
+        pass
