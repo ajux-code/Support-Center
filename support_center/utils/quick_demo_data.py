@@ -14,6 +14,38 @@ To clear:
 import frappe
 from frappe.utils import nowdate, add_days, add_months, getdate, now
 import random
+import os
+
+
+def is_production_environment():
+    """
+    Check if running in production environment
+    Returns True if production, False if development/staging
+    """
+    # Check 1: Site name contains production indicators
+    site = frappe.local.site
+    production_indicators = ["production", "prod", "live", ".com", ".co", ".org"]
+
+    # Allow localhost and development sites
+    if site in ["localhost", "127.0.0.1", "dev.localhost", "staging.localhost"]:
+        return False
+
+    # Check for production indicators in site name
+    for indicator in production_indicators:
+        if indicator in site.lower():
+            return True
+
+    # Check 2: Environment variable
+    env = os.environ.get("FRAPPE_ENV", "development")
+    if env.lower() in ["production", "prod"]:
+        return True
+
+    # Check 3: Developer mode (production has this disabled)
+    if not frappe.conf.get("developer_mode"):
+        # If developer mode is off, assume production unless explicitly allowed
+        return True
+
+    return False
 
 
 def generate_quick_demo():
@@ -21,6 +53,25 @@ def generate_quick_demo():
     print("\n" + "="*70)
     print("QUICK DEMO DATA GENERATOR")
     print("="*70 + "\n")
+
+    # SAFETY CHECK: Prevent running in production
+    if is_production_environment():
+        print("🚨 ERROR: PRODUCTION ENVIRONMENT DETECTED")
+        print("="*70)
+        print("Demo data generation is DISABLED in production for safety.")
+        print(f"Current site: {frappe.local.site}")
+        print(f"Developer mode: {frappe.conf.get('developer_mode', False)}")
+        print("\nThis script only runs on:")
+        print("  - localhost")
+        print("  - dev.localhost")
+        print("  - staging.localhost")
+        print("  - Sites with developer_mode enabled")
+        print("="*70 + "\n")
+        frappe.throw("Demo data generation blocked in production environment")
+        return False
+
+    print(f"✓ Environment check passed: {frappe.local.site}")
+    print(f"✓ Developer mode: {frappe.conf.get('developer_mode', False)}\n")
 
     try:
         # Get or create customers
@@ -152,6 +203,13 @@ def generate_orders_sql(customers):
 def clear_quick_demo():
     """Clear all demo data"""
     print("\n⚠️  Clearing demo data...")
+
+    # SAFETY CHECK: Prevent running in production
+    if is_production_environment():
+        print("🚨 ERROR: PRODUCTION ENVIRONMENT DETECTED")
+        print("Demo data clearing is DISABLED in production for safety.")
+        frappe.throw("Demo data operations blocked in production environment")
+        return False
 
     try:
         # Delete orders

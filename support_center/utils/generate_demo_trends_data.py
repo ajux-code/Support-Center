@@ -15,6 +15,20 @@ import frappe
 from frappe.utils import nowdate, add_days, add_months, getdate, flt
 from datetime import datetime
 import random
+import os
+
+
+def is_production_environment():
+    """Check if running in production - returns True if production"""
+    site = frappe.local.site
+    if site in ["localhost", "127.0.0.1", "dev.localhost", "staging.localhost"]:
+        return False
+    production_indicators = ["production", "prod", "live", ".com", ".co", ".org"]
+    if any(ind in site.lower() for ind in production_indicators):
+        return True
+    if not frappe.conf.get("developer_mode"):
+        return True
+    return False
 
 
 def generate_trends_data():
@@ -22,6 +36,15 @@ def generate_trends_data():
     print("\n" + "="*70)
     print("GENERATING TRENDS & ANALYTICS DEMO DATA")
     print("="*70 + "\n")
+
+    # SAFETY CHECK: Prevent running in production
+    if is_production_environment():
+        print("🚨 ERROR: PRODUCTION ENVIRONMENT DETECTED")
+        print("Demo data generation is DISABLED in production.")
+        frappe.throw("Demo data generation blocked in production environment")
+        return False
+
+    print(f"✓ Environment: {frappe.local.site} (development)\n")
 
     frappe.set_user("Administrator")
 
@@ -223,6 +246,12 @@ def add_contact_records(customers):
 def clear_trends_data():
     """Clear demo data"""
     print("\n⚠️  Clearing demo trends data...")
+
+    # SAFETY CHECK
+    if is_production_environment():
+        print("🚨 ERROR: Blocked in production")
+        frappe.throw("Demo data operations blocked in production")
+        return False
 
     try:
         # Delete sales orders
