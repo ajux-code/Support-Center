@@ -121,6 +121,7 @@ def require_login():
 
 # Define roles that have access to retention dashboard
 RETENTION_ACCESS_ROLES = [
+    "Administrator",
     "Sales Manager",
     "System Manager",
     "Accounts Manager"
