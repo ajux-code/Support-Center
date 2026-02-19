@@ -17,7 +17,7 @@ add_to_apps_screen = [
 		"name": "support_center",
 		"logo": "/assets/support_center/images/support-dashboard-logo.svg",
 		"title": "Support Center",
-		"route": "/app/support-center",
+		"route": "/support-center",
 		"has_permission": "support_center.api.permissions.has_app_permission"
 	},
 	{
@@ -82,7 +82,7 @@ web_include_css = "/assets/support_center/css/support-dashboard.css"
 # -------------------
 
 website_route_rules = [
-    {"from_route": "/support-dashboard", "to_route": "support-dashboard"},
+    {"from_route": "/support-center", "to_route": "support-center"},
 ]
 
 # Jinja
@@ -267,6 +267,6 @@ website_route_rules = [
 fixtures = [
 	{
 		"doctype": "Page",
-		"filters": [["name", "in", ["support-dashboard"]]]
+		"filters": [["name", "in", ["support-center"]]]
 	}
 ]

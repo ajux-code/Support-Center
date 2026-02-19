@@ -16,7 +16,7 @@
 	"shortcuts": [
 		{
 			"type": "Page",
-			"link_to": "support-dashboard",
+			"link_to": "support-center",
 			"label": "Support Dashboard",
 			"color": "Blue",
 			"format": "Open"
@@ -54,7 +54,7 @@
 			"type": "Link",
 			"label": "Support Dashboard",
 			"link_type": "Page",
-			"link_to": "support-dashboard",
+			"link_to": "support-center",
 			"onboard": 1
 		},
 		{

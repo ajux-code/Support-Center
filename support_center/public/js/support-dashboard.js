@@ -336,7 +336,7 @@ class SupportDashboard {
 
     loadCustomer(customerId) {
         // Navigate to dedicated customer detail page using query parameter
-        window.location.href = `/support-dashboard?customer=${encodeURIComponent(customerId)}`;
+        window.location.href = `/support-center?customer=${encodeURIComponent(customerId)}`;
     }
 
     loadRecord(recordId, recordType) {
@@ -351,7 +351,7 @@ class SupportDashboard {
         };
         const param = paramMap[recordType] || 'customer';
         console.log('Navigating to param:', param); // Debug log
-        window.location.href = `/support-dashboard?${param}=${encodeURIComponent(recordId)}`;
+        window.location.href = `/support-center?${param}=${encodeURIComponent(recordId)}`;
     }
 
     async loadRecordDetail(recordId, recordType) {
@@ -433,7 +433,7 @@ class SupportDashboard {
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load customer data</h2>
                     <p>${error.message || 'Please try again'}</p>
-                    <a href="/support-dashboard" class="btn-primary">Back to Dashboard</a>
+                    <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
         }
@@ -467,7 +467,7 @@ class SupportDashboard {
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load booking data</h2>
                     <p>${error.message || 'Please try again'}</p>
-                    <a href="/support-dashboard" class="btn-primary">Back to Dashboard</a>
+                    <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
         }
@@ -501,7 +501,7 @@ class SupportDashboard {
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load contact data</h2>
                     <p>${error.message || 'Please try again'}</p>
-                    <a href="/support-dashboard" class="btn-primary">Back to Dashboard</a>
+                    <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
         }
@@ -535,7 +535,7 @@ class SupportDashboard {
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load user data</h2>
                     <p>${error.message || 'Please try again'}</p>
-                    <a href="/support-dashboard" class="btn-primary">Back to Dashboard</a>
+                    <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
         }
@@ -569,7 +569,7 @@ class SupportDashboard {
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load ticket data</h2>
                     <p>${error.message || 'Please try again'}</p>
-                    <a href="/support-dashboard" class="btn-primary">Back to Dashboard</a>
+                    <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
         }
@@ -1252,7 +1252,7 @@ class SupportDashboard {
         backBtn.innerHTML = '← Back to Customer List';
         backBtn.onclick = () => {
             // Navigate to base URL without query params to show customer list
-            window.location.href = '/support-dashboard';
+            window.location.href = '/support-center';
         };
         this.contentContainer.appendChild(backBtn);
 
@@ -2715,7 +2715,7 @@ class SupportDashboard {
         backBtn.className = 'back-button';
         backBtn.innerHTML = '← Back to List';
         backBtn.onclick = () => {
-            window.location.href = '/support-dashboard';
+            window.location.href = '/support-center';
         };
         this.contentContainer.appendChild(backBtn);
 
@@ -3047,7 +3047,7 @@ class SupportDashboard {
         backBtn.className = 'back-button';
         backBtn.innerHTML = '← Back to List';
         backBtn.onclick = () => {
-            window.location.href = '/support-dashboard';
+            window.location.href = '/support-center';
         };
         this.contentContainer.appendChild(backBtn);
 
@@ -3179,7 +3179,7 @@ class SupportDashboard {
         backBtn.className = 'back-button';
         backBtn.innerHTML = '← Back to List';
         backBtn.onclick = () => {
-            window.location.href = '/support-dashboard';
+            window.location.href = '/support-center';
         };
         this.contentContainer.appendChild(backBtn);
 
