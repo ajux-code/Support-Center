@@ -8,9 +8,9 @@
     "modified": "2026-01-26 12:00:00.000000",
     "modified_by": "Administrator",
     "module": "Support Center",
-    "name": "support-dashboard",
+    "name": "support-center",
     "owner": "Administrator",
-    "page_name": "support-dashboard",
+    "page_name": "support-center",
     "roles": [
         {
             "role": "System Manager"

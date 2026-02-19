@@ -5,7 +5,7 @@
  * for seamless integration into the Frappe Desk sidebar.
  */
 
-frappe.pages['support_dashboard'].on_page_load = function(wrapper) {
+frappe.pages['support_center'].on_page_load = function(wrapper) {
     var page = frappe.ui.make_app_page({
         parent: wrapper,
         title: 'Support Dashboard',
@@ -78,7 +78,7 @@ frappe.pages['support_dashboard'].on_page_load = function(wrapper) {
 };
 
 // Cleanup when page is unloaded
-frappe.pages['support_dashboard'].on_page_show = function(wrapper) {
+frappe.pages['support_center'].on_page_show = function(wrapper) {
     // Refresh iframe on page show
     const iframe = document.getElementById('support-dashboard-iframe');
     if (iframe && iframe.src) {

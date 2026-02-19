@@ -17,7 +17,7 @@ add_to_apps_screen = [
 		"name": "support_center",
 		"logo": "/assets/support_center/images/support-dashboard-logo.svg",
 		"title": "Support Center",
-		"route": "/app/support-dashboard",
+		"route": "/app/support-center",
 		"has_permission": "support_center.api.permissions.has_app_permission"
 	},
 	{
