@@ -19,6 +19,13 @@ add_to_apps_screen = [
 		"title": "Support Center",
 		"route": "/app/support-dashboard",
 		"has_permission": "support_center.api.permissions.has_app_permission"
+	},
+	{
+		"name": "retention_dashboard",
+		"logo": "/assets/support_center/images/retention-dashboard-logo.svg",
+		"title": "Retention Dashboard",
+		"route": "/retention-dashboard",
+		"has_permission": "support_center.api.permissions.has_app_permission"
 	}
 ]
 

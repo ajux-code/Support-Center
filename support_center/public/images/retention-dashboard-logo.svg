@@ -1,0 +1,15 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100" height="100" rx="20" fill="#10B981"/>
+  <path d="M30 65L30 70L35 70L35 65L30 65Z" fill="white"/>
+  <path d="M40 55L40 70L45 70L45 55L40 55Z" fill="white"/>
+  <path d="M50 45L50 70L55 70L55 45L50 45Z" fill="white"/>
+  <path d="M60 35L60 70L65 70L65 35L60 35Z" fill="white"/>
+  <path d="M25 72L75 72" stroke="white" stroke-width="2" stroke-linecap="round"/>
+  <path d="M23 70L23 28" stroke="white" stroke-width="2" stroke-linecap="round"/>
+  <path d="M32.5 62L42.5 52L52.5 42L62.5 32" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32.5" cy="62" r="3" fill="white"/>
+  <circle cx="42.5" cy="52" r="3" fill="white"/>
+  <circle cx="52.5" cy="42" r="3" fill="white"/>
+  <circle cx="62.5" cy="32" r="3" fill="white"/>
+  <path d="M62 25L68 28L65 34" fill="white"/>
+</svg>
