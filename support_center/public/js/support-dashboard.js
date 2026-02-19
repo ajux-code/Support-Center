@@ -1887,12 +1887,18 @@ class SupportDashboard {
         return orderedGroups;
     }
 
+    getCsrfToken() {
+        if (window.frappe?.csrf_token) return window.frappe.csrf_token;
+        const match = document.cookie.match(/csrf_token=([^;]+)/);
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+
     async apiCall(method, args) {
         const response = await fetch(`/api/method/${method}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-Frappe-CSRF-Token': window.frappe.csrf_token
+                'X-Frappe-CSRF-Token': this.getCsrfToken()
             },
             body: JSON.stringify(args)
         });
