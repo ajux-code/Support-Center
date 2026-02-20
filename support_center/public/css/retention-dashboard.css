@@ -13,10 +13,6 @@ body > footer,
     display: none !important;
 }
 
-/* Hide website-specific top bar items (e.g. "Meeting Booking") */
-.navbar .mr-auto.navbar-nav {
-    display: none !important;
-}
 
 /* ============================================
    CSS Variables - Neutral shadcn Theme
@@ -236,9 +232,8 @@ body {
    Dashboard Container
    ============================================ */
 .retention-dashboard {
-    max-width: 1140px;
-    margin: 0 auto;
-    padding: 1.5rem 15px;
+    padding-top: 1.5rem;
+    padding-bottom: 1.5rem;
 }
 
 /* ============================================
@@ -3309,7 +3304,8 @@ body {
 
 @media (max-width: 768px) {
     .retention-dashboard {
-        padding: 1rem;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
     }
 
     .dashboard-header {

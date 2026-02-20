@@ -26,6 +26,7 @@ def get_context(context):
     # Page configuration
     context.no_cache = 1
     context.show_sidebar = False
+    context.top_bar_items = []
 
     # Pass user info to template
     context.user = frappe.session.user
