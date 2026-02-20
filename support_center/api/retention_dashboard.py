@@ -77,6 +77,39 @@ ENGAGEMENT_OCCASIONAL = 2  # 4 points
 # Pricing
 PRICE_PER_SEAT = 50  # Estimated price per seat for upsell calculations
 
+# Custom field names on Sales Order that may or may not exist
+SO_CUSTOM_FIELDS = [
+    "custom_order_type",
+    "custom_product",
+    "custom_trend_micro_seats",
+    "custom_previous_order",
+    "custom_salesperson",
+]
+
+# Cache for available custom fields (checked once per request)
+_available_fields_cache = {}
+
+
+def get_available_so_fields():
+    """Check which custom fields actually exist on the Sales Order table.
+    Caches per request to avoid repeated DB lookups."""
+    if _available_fields_cache.get("sales_order"):
+        return _available_fields_cache["sales_order"]
+
+    available = set()
+    meta = frappe.get_meta("Sales Order")
+    for field_name in SO_CUSTOM_FIELDS:
+        if meta.has_field(field_name):
+            available.add(field_name)
+
+    _available_fields_cache["sales_order"] = available
+    return available
+
+
+def has_so_field(field_name):
+    """Check if a specific custom field exists on Sales Order."""
+    return field_name in get_available_so_fields()
+
 
 @frappe.whitelist()
 @require_retention_access
@@ -172,6 +205,8 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
 
         # Optimized query with LEFT JOINs to avoid N+1 problem
         # Uses derived tables to pre-aggregate data per customer
+        products_col = "GROUP_CONCAT(DISTINCT so.custom_product) as products_purchased" if has_so_field("custom_product") else "NULL as products_purchased"
+
         customers = frappe.db.sql("""
         SELECT
             c.name as customer_id,
@@ -196,7 +231,7 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
                 MAX(so.transaction_date) as last_order_date,
                 SUM(so.grand_total) as lifetime_value,
                 COUNT(*) as total_orders,
-                GROUP_CONCAT(DISTINCT so.custom_product) as products_purchased
+                {products_col}
             FROM `tabSales Order` so
             WHERE so.docstatus = 1
             GROUP BY so.customer
@@ -224,7 +259,7 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
         WHERE c.disabled = 0
         ORDER BY order_data.last_order_date DESC
         LIMIT %(limit)s OFFSET %(offset)s
-        """, {"limit": cint(limit), "offset": cint(offset)}, as_dict=True)
+        """.format(products_col=products_col), {"limit": cint(limit), "offset": cint(offset)}, as_dict=True)
 
         query_time = time.time() - query_start
         frappe.logger().info(f"Client list query completed in {query_time:.3f}s for {len(customers)} customers (filter: {status_filter})")
@@ -330,24 +365,34 @@ def get_client_retention_detail(customer_id):
 
         customer = frappe.get_doc("Customer", customer_id)
 
-        # Get purchase history
+        # Get purchase history — dynamically include custom fields if they exist
+        custom_cols = []
+        if has_so_field("custom_order_type"):
+            custom_cols.append("so.custom_order_type as order_type")
+        if has_so_field("custom_product"):
+            custom_cols.append("so.custom_product as product")
+        if has_so_field("custom_trend_micro_seats"):
+            custom_cols.append("so.custom_trend_micro_seats as seats")
+        if has_so_field("custom_previous_order"):
+            custom_cols.append("so.custom_previous_order as previous_order")
+        if has_so_field("custom_salesperson"):
+            custom_cols.append("so.custom_salesperson as salesperson")
+
+        extra_cols = (", " + ", ".join(custom_cols)) if custom_cols else ""
+
         orders = frappe.db.sql("""
         SELECT
             so.name as order_id,
             so.transaction_date,
             so.grand_total,
-            so.status,
-            so.custom_order_type as order_type,
-            so.custom_product as product,
-            so.custom_trend_micro_seats as seats,
-            so.custom_previous_order as previous_order,
-            so.custom_salesperson as salesperson
+            so.status
+            {extra_cols}
         FROM `tabSales Order` so
         WHERE so.customer = %(customer)s
         AND so.docstatus = 1
         ORDER BY so.transaction_date DESC
         LIMIT 20
-        """, {"customer": customer_id}, as_dict=True)
+        """.format(extra_cols=extra_cols), {"customer": customer_id}, as_dict=True)
 
         # Get subscriptions
         subscriptions = frappe.db.sql("""
@@ -565,45 +610,61 @@ def get_trend_data(months=12):
             })
 
         # Get order counts and revenue by month
+        has_order_type = has_so_field("custom_order_type")
         results = []
         for month in month_data:
-            # Count renewal orders
-            renewal_count = frappe.db.count("Sales Order", {
-                "docstatus": 1,
-                "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
-                "transaction_date": ["between", [month["month_start"], month["month_end"]]]
-            })
-
-            # Count new orders
-            new_count = frappe.db.count("Sales Order", {
-                "docstatus": 1,
-                "custom_order_type": ["in", ["New Order Private", "New Order Business"]],
-                "transaction_date": ["between", [month["month_start"], month["month_end"]]]
-            })
-
             # Total orders for the month
             total_orders = frappe.db.count("Sales Order", {
                 "docstatus": 1,
                 "transaction_date": ["between", [month["month_start"], month["month_end"]]]
             })
 
+            renewal_count = 0
+            new_count = 0
+
+            if has_order_type:
+                # Count renewal orders
+                renewal_count = frappe.db.count("Sales Order", {
+                    "docstatus": 1,
+                    "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+                    "transaction_date": ["between", [month["month_start"], month["month_end"]]]
+                })
+
+                # Count new orders
+                new_count = frappe.db.count("Sales Order", {
+                    "docstatus": 1,
+                    "custom_order_type": ["in", ["New Order Private", "New Order Business"]],
+                    "transaction_date": ["between", [month["month_start"], month["month_end"]]]
+                })
+
             # Calculate renewal rate
             renewal_rate = 0
-            if total_orders > 0:
+            if total_orders > 0 and has_order_type:
                 renewal_rate = round((renewal_count / total_orders) * 100, 1)
 
             # Get revenue
-            revenue_data = frappe.db.sql("""
-                SELECT
-                    COALESCE(SUM(grand_total), 0) as total_revenue,
-                    COALESCE(SUM(CASE WHEN custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
-                        THEN grand_total ELSE 0 END), 0) as renewal_revenue,
-                    COALESCE(SUM(CASE WHEN custom_order_type IN ('New Order Private', 'New Order Business')
-                        THEN grand_total ELSE 0 END), 0) as new_revenue
-                FROM `tabSales Order`
-                WHERE docstatus = 1
-                AND transaction_date BETWEEN %(start)s AND %(end)s
-            """, {"start": month["month_start"], "end": month["month_end"]}, as_dict=True)[0]
+            if has_order_type:
+                revenue_data = frappe.db.sql("""
+                    SELECT
+                        COALESCE(SUM(grand_total), 0) as total_revenue,
+                        COALESCE(SUM(CASE WHEN custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+                            THEN grand_total ELSE 0 END), 0) as renewal_revenue,
+                        COALESCE(SUM(CASE WHEN custom_order_type IN ('New Order Private', 'New Order Business')
+                            THEN grand_total ELSE 0 END), 0) as new_revenue
+                    FROM `tabSales Order`
+                    WHERE docstatus = 1
+                    AND transaction_date BETWEEN %(start)s AND %(end)s
+                """, {"start": month["month_start"], "end": month["month_end"]}, as_dict=True)[0]
+            else:
+                revenue_data = frappe.db.sql("""
+                    SELECT
+                        COALESCE(SUM(grand_total), 0) as total_revenue,
+                        0 as renewal_revenue,
+                        0 as new_revenue
+                    FROM `tabSales Order`
+                    WHERE docstatus = 1
+                    AND transaction_date BETWEEN %(start)s AND %(end)s
+                """, {"start": month["month_start"], "end": month["month_end"]}, as_dict=True)[0]
 
             results.append({
                 "label": month["label"],
@@ -762,22 +823,34 @@ def get_product_retention_analysis():
     Analyze retention rates by product category
     """
     try:
+        # Product analysis requires custom_product field
+        if not has_so_field("custom_product"):
+            log_security_event("product_analysis_access", "Product analysis unavailable - custom_product field missing")
+            return []
+
+        has_order_type = has_so_field("custom_order_type")
+        has_seats = has_so_field("custom_trend_micro_seats")
+
+        renewal_col = "SUM(CASE WHEN so.custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business') THEN 1 ELSE 0 END) as renewal_orders" if has_order_type else "0 as renewal_orders"
+        new_col = "SUM(CASE WHEN so.custom_order_type IN ('New Order Private', 'New Order Business') THEN 1 ELSE 0 END) as new_orders" if has_order_type else "0 as new_orders"
+        seats_col = "AVG(so.custom_trend_micro_seats) as avg_seats" if has_seats else "0 as avg_seats"
+
         products = frappe.db.sql("""
         SELECT
             so.custom_product as product,
             COUNT(DISTINCT so.customer) as unique_customers,
             COUNT(*) as total_orders,
             SUM(so.grand_total) as total_revenue,
-            SUM(CASE WHEN so.custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business') THEN 1 ELSE 0 END) as renewal_orders,
-            SUM(CASE WHEN so.custom_order_type IN ('New Order Private', 'New Order Business') THEN 1 ELSE 0 END) as new_orders,
-            AVG(so.custom_trend_micro_seats) as avg_seats
+            {renewal_col},
+            {new_col},
+            {seats_col}
         FROM `tabSales Order` so
         WHERE so.docstatus = 1
         AND so.custom_product IS NOT NULL
         AND so.custom_product != ''
         GROUP BY so.custom_product
         ORDER BY total_revenue DESC
-    """, as_dict=True)
+    """.format(renewal_col=renewal_col, new_col=new_col, seats_col=seats_col), as_dict=True)
 
         # Calculate retention rate per product
         for product in products:
@@ -824,6 +897,7 @@ def get_kpi_comparisons():
     last_month_start = last_month_end.replace(day=1)
 
     comparisons = {}
+    has_order_type = has_so_field("custom_order_type")
 
     # 1. Total Customers comparison (new customers this month vs last month)
     new_customers_current = frappe.db.count("Customer", {
@@ -837,60 +911,65 @@ def get_kpi_comparisons():
     comparisons["customers"] = calculate_change(new_customers_current, new_customers_last)
 
     # 2. Clients at risk comparison
-    # This month's at-risk (using 60 days ago from current month start vs 60 days from last month start)
     at_risk_current = get_at_risk_customers_count()
-    # For last month, we approximate by checking customers that were at risk then
-    # We'll use the same logic but shifted by one month
     comparisons["at_risk"] = {
         "change": 0,
         "direction": "neutral",
         "label": "vs last month"
-    }  # We can't accurately calculate historical at-risk, so neutral
+    }
 
     # 3. Renewal revenue comparison (renewals this month vs last month)
-    renewal_revenue_current = frappe.db.sql("""
-        SELECT COALESCE(SUM(grand_total), 0) as total
-        FROM `tabSales Order`
-        WHERE docstatus = 1
-        AND custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
-        AND transaction_date BETWEEN %(start)s AND %(end)s
-    """, {"start": str(current_month_start), "end": str(current_month_end)}, as_dict=True)[0].get("total", 0)
+    renewal_revenue_current = 0
+    renewal_revenue_last = 0
 
-    renewal_revenue_last = frappe.db.sql("""
-        SELECT COALESCE(SUM(grand_total), 0) as total
-        FROM `tabSales Order`
-        WHERE docstatus = 1
-        AND custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
-        AND transaction_date BETWEEN %(start)s AND %(end)s
-    """, {"start": str(last_month_start), "end": str(last_month_end)}, as_dict=True)[0].get("total", 0)
+    if has_order_type:
+        renewal_revenue_current = frappe.db.sql("""
+            SELECT COALESCE(SUM(grand_total), 0) as total
+            FROM `tabSales Order`
+            WHERE docstatus = 1
+            AND custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+            AND transaction_date BETWEEN %(start)s AND %(end)s
+        """, {"start": str(current_month_start), "end": str(current_month_end)}, as_dict=True)[0].get("total", 0)
+
+        renewal_revenue_last = frappe.db.sql("""
+            SELECT COALESCE(SUM(grand_total), 0) as total
+            FROM `tabSales Order`
+            WHERE docstatus = 1
+            AND custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+            AND transaction_date BETWEEN %(start)s AND %(end)s
+        """, {"start": str(last_month_start), "end": str(last_month_end)}, as_dict=True)[0].get("total", 0)
+
     comparisons["renewal_revenue"] = calculate_change(
         flt(renewal_revenue_current),
         flt(renewal_revenue_last)
     )
 
     # 4. Renewal rate comparison
-    # Current month renewal rate
     total_orders_current = frappe.db.count("Sales Order", {
         "docstatus": 1,
         "transaction_date": ["between", [str(current_month_start), str(current_month_end)]]
     })
-    renewal_orders_current = frappe.db.count("Sales Order", {
-        "docstatus": 1,
-        "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
-        "transaction_date": ["between", [str(current_month_start), str(current_month_end)]]
-    })
-    rate_current = (renewal_orders_current / total_orders_current * 100) if total_orders_current > 0 else 0
-
-    # Last month renewal rate
     total_orders_last = frappe.db.count("Sales Order", {
         "docstatus": 1,
         "transaction_date": ["between", [str(last_month_start), str(last_month_end)]]
     })
-    renewal_orders_last = frappe.db.count("Sales Order", {
-        "docstatus": 1,
-        "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
-        "transaction_date": ["between", [str(last_month_start), str(last_month_end)]]
-    })
+
+    renewal_orders_current = 0
+    renewal_orders_last = 0
+
+    if has_order_type:
+        renewal_orders_current = frappe.db.count("Sales Order", {
+            "docstatus": 1,
+            "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+            "transaction_date": ["between", [str(current_month_start), str(current_month_end)]]
+        })
+        renewal_orders_last = frappe.db.count("Sales Order", {
+            "docstatus": 1,
+            "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+            "transaction_date": ["between", [str(last_month_start), str(last_month_end)]]
+        })
+
+    rate_current = (renewal_orders_current / total_orders_current * 100) if total_orders_current > 0 else 0
     rate_last = (renewal_orders_last / total_orders_last * 100) if total_orders_last > 0 else 0
     comparisons["renewal_rate"] = calculate_change(rate_current, rate_last, is_percentage=True)
 
@@ -946,12 +1025,23 @@ def get_renewal_metrics():
     month_start = getdate(today).replace(day=1)
     year_ago = add_days(today, -DAYS_INACTIVE_CRITICAL)
 
-    # Renewal rate: renewals / (renewals + churned)
-    total_renewal_orders = frappe.db.count("Sales Order", {
-        "docstatus": 1,
-        "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
-        "transaction_date": [">=", year_ago]
-    })
+    total_renewal_orders = 0
+    renewals_this_month = 0
+
+    if has_so_field("custom_order_type"):
+        # Renewal rate: renewals / (renewals + churned)
+        total_renewal_orders = frappe.db.count("Sales Order", {
+            "docstatus": 1,
+            "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+            "transaction_date": [">=", year_ago]
+        })
+
+        # Renewals this month
+        renewals_this_month = frappe.db.count("Sales Order", {
+            "docstatus": 1,
+            "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
+            "transaction_date": [">=", month_start]
+        })
 
     total_customers_with_orders = frappe.db.sql("""
         SELECT COUNT(DISTINCT customer)
@@ -959,13 +1049,6 @@ def get_renewal_metrics():
         WHERE docstatus = 1
         AND transaction_date >= %(year_ago)s
     """, {"year_ago": year_ago})[0][0] or 1
-
-    # Renewals this month
-    renewals_this_month = frappe.db.count("Sales Order", {
-        "docstatus": 1,
-        "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
-        "transaction_date": [">=", month_start]
-    })
 
     # Average LTV
     avg_ltv = frappe.db.sql("""
@@ -1047,8 +1130,8 @@ def get_upcoming_renewal_revenue(days=DAYS_RENEWAL_WINDOW):
 
 def calculate_total_upsell_potential():
     """Calculate total upsell potential across all customers"""
-    # Simple heuristic: customers with fewer seats than average could upgrade
-    # Plus customers on lower-tier products could upgrade
+    if not has_so_field("custom_trend_micro_seats"):
+        return 0
 
     avg_seats = frappe.db.sql("""
         SELECT AVG(custom_trend_micro_seats)
@@ -1737,6 +1820,8 @@ def search_customers(query, limit=50):
         search_pattern = f"%{query}%"
 
         # Search query with optimized JOINs
+        products_col = "GROUP_CONCAT(DISTINCT custom_product) as products_purchased" if has_so_field("custom_product") else "NULL as products_purchased"
+
         customers = frappe.db.sql("""
             SELECT
                 c.name as customer_id,
@@ -1758,7 +1843,7 @@ def search_customers(query, limit=50):
                     MAX(transaction_date) as last_order_date,
                     SUM(grand_total) as lifetime_value,
                     COUNT(*) as total_orders,
-                    GROUP_CONCAT(DISTINCT custom_product) as products_purchased
+                    {products_col}
                 FROM `tabSales Order`
                 WHERE docstatus = 1
                 GROUP BY customer
@@ -1788,7 +1873,7 @@ def search_customers(query, limit=50):
                 END,
                 COALESCE(co.last_order_date, '1900-01-01') DESC
             LIMIT %(limit)s
-        """, {
+        """.format(products_col=products_col), {
             "search_pattern": search_pattern,
             "limit": limit
         }, as_dict=True)

@@ -268,5 +268,15 @@ fixtures = [
 	{
 		"doctype": "Page",
 		"filters": [["name", "in", ["support-center"]]]
+	},
+	{
+		"doctype": "Custom Field",
+		"filters": [["dt", "=", "Sales Order"], ["fieldname", "in", [
+			"custom_order_type",
+			"custom_product",
+			"custom_trend_micro_seats",
+			"custom_previous_order",
+			"custom_salesperson",
+		]]]
 	}
 ]
