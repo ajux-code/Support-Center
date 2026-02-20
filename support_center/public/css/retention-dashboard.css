@@ -13,8 +13,8 @@ body > footer,
     display: none !important;
 }
 
-/* Hide website-specific navbar items (e.g. "Meeting Booking") */
-.navbar .nav-items {
+/* Hide website-specific top bar items (e.g. "Meeting Booking") */
+.navbar .mr-auto.navbar-nav {
     display: none !important;
 }
 
@@ -236,9 +236,9 @@ body {
    Dashboard Container
    ============================================ */
 .retention-dashboard {
-    max-width: 1200px;
+    max-width: 1140px;
     margin: 0 auto;
-    padding: 1.5rem 3rem;
+    padding: 1.5rem 15px;
 }
 
 /* ============================================
