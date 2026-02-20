@@ -10,7 +10,6 @@ class RetentionDashboard {
         this.productAnalysisContainer = document.getElementById('product-analysis');
         this.modal = document.getElementById('client-detail-modal');
         this.searchInput = document.getElementById('client-search');
-        this.refreshBtn = document.getElementById('refresh-btn');
 
         this.currentFilter = '';
         this.clients = [];
@@ -78,11 +77,6 @@ class RetentionDashboard {
     }
 
     initializeEventListeners() {
-        // Refresh button
-        if (this.refreshBtn) {
-            this.refreshBtn.addEventListener('click', () => this.loadDashboard());
-        }
-
         // Filter tabs
         document.querySelectorAll('.filter-tab').forEach(tab => {
             tab.addEventListener('click', (e) => {
@@ -205,12 +199,6 @@ class RetentionDashboard {
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                 e.preventDefault();
                 this.searchInput?.focus();
-            }
-
-            // Ctrl/Cmd + R or F5 - Refresh dashboard
-            if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
-                e.preventDefault();
-                this.loadDashboard();
             }
 
             // Ctrl/Cmd + 1-4 - Switch tabs
@@ -1350,7 +1338,6 @@ class RetentionDashboard {
         this.showToast(`
             <strong>Keyboard Shortcuts:</strong><br>
             <kbd>${modKey} + K</kbd> Focus search<br>
-            <kbd>${modKey} + R</kbd> Refresh dashboard<br>
             <kbd>${modKey} + 1-4</kbd> Switch tabs<br>
             <kbd>Esc</kbd> Close modal<br>
             <kbd>?</kbd> Show this help
