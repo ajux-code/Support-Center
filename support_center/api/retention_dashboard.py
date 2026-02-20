@@ -515,35 +515,43 @@ def get_renewal_calendar(start_date=None, end_date=None):
         # Validate date range
         start_date, end_date = validate_date_range(start_date, end_date)
 
-        # Optimized query with LEFT JOIN instead of correlated subquery
+        # Query 1: Get subscriptions (fast — uses idx_party_status_enddate)
         renewals = frappe.db.sql("""
         SELECT
             sub.name as subscription_id,
             sub.party as customer_id,
             c.customer_name,
             sub.end_date as renewal_date,
-            sub.status,
-            COALESCE(SUM(so.grand_total), 0) as annual_value
+            sub.status
         FROM `tabSubscription` sub
         JOIN `tabCustomer` c ON c.name = sub.party
-        LEFT JOIN `tabSales Order` so ON (
-            so.customer = sub.party
-            AND so.docstatus = 1
-            AND so.transaction_date >= DATE_SUB(sub.end_date, INTERVAL 1 YEAR)
-        )
         WHERE sub.party_type = 'Customer'
         AND sub.status IN ('Active', 'Past Due Date', 'Unpaid')
         AND sub.end_date BETWEEN %(start)s AND %(end)s
-        GROUP BY sub.name, sub.party, c.customer_name, sub.end_date, sub.status
         ORDER BY sub.end_date ASC
-    """, {"start": start_date, "end": end_date}, as_dict=True)
+        """, {"start": start_date, "end": end_date}, as_dict=True)
+
+        # Query 2: Get sales totals per customer (fast — uses idx_customer_docstatus_date)
+        customer_ids = list({r.customer_id for r in renewals})
+        sales_by_customer = {}
+        if customer_ids:
+            cutoff = str(add_days(start_date, -365))
+            sales_rows = frappe.db.sql("""
+            SELECT so.customer, SUM(so.grand_total) as annual_value
+            FROM `tabSales Order` so
+            WHERE so.customer IN %(customers)s
+            AND so.docstatus = 1
+            AND so.transaction_date >= %(cutoff)s
+            GROUP BY so.customer
+            """, {"customers": tuple(customer_ids), "cutoff": cutoff}, as_dict=True)
+            sales_by_customer = {r.customer: flt(r.annual_value) for r in sales_rows}
 
         query_time = time.time() - query_start
         frappe.logger().info(f"Renewal calendar query completed in {query_time:.3f}s for {len(renewals)} renewals")
 
-        # Add risk level based on annual value
+        # Merge sales data and assign risk levels
         for renewal in renewals:
-            annual_value = flt(renewal.get("annual_value", 0))
+            annual_value = sales_by_customer.get(renewal.customer_id, 0)
             if annual_value >= REVENUE_HIGH_VALUE:
                 renewal["risk_level"] = "high"
             elif annual_value >= REVENUE_MEDIUM_VALUE:
@@ -729,39 +737,46 @@ def get_calendar_view_data(year=None, month=None):
         else:
             last_day = datetime(year, month + 1, 1).date() - timedelta(days=1)
 
-        # Optimized query with LEFT JOIN instead of correlated subquery
+        # Query 1: Get subscriptions (fast — uses idx_party_status_enddate)
         renewals = frappe.db.sql("""
         SELECT
             sub.name as subscription_id,
             sub.party as customer_id,
             c.customer_name,
             sub.end_date as renewal_date,
-            sub.status,
-            COALESCE(SUM(so.grand_total), 0) as annual_value
+            sub.status
         FROM `tabSubscription` sub
         JOIN `tabCustomer` c ON c.name = sub.party
-        LEFT JOIN `tabSales Order` so ON (
-            so.customer = sub.party
-            AND so.docstatus = 1
-            AND so.transaction_date >= DATE_SUB(sub.end_date, INTERVAL 1 YEAR)
-        )
         WHERE sub.party_type = 'Customer'
         AND sub.status IN ('Active', 'Past Due Date', 'Unpaid')
         AND sub.end_date BETWEEN %(start)s AND %(end)s
-        GROUP BY sub.name, sub.party, c.customer_name, sub.end_date, sub.status
-        ORDER BY sub.end_date ASC, annual_value DESC
+        ORDER BY sub.end_date ASC
         """, {"start": str(first_day), "end": str(last_day)}, as_dict=True)
+
+        # Query 2: Get sales totals per customer (fast — uses idx_customer_docstatus_date)
+        customer_ids = list({r.customer_id for r in renewals})
+        sales_by_customer = {}
+        if customer_ids:
+            cutoff = str((first_day - timedelta(days=365)))
+            sales_rows = frappe.db.sql("""
+            SELECT so.customer, SUM(so.grand_total) as annual_value
+            FROM `tabSales Order` so
+            WHERE so.customer IN %(customers)s
+            AND so.docstatus = 1
+            AND so.transaction_date >= %(cutoff)s
+            GROUP BY so.customer
+            """, {"customers": tuple(customer_ids), "cutoff": cutoff}, as_dict=True)
+            sales_by_customer = {r.customer: flt(r.annual_value) for r in sales_rows}
 
         query_time = time.time() - query_start
         frappe.logger().info(f"Calendar view query completed in {query_time:.3f}s for {len(renewals)} renewals ({year}-{month})")
 
-        # Group by date
+        # Merge sales data, assign risk levels, and group by date
         by_date = {}
         for renewal in renewals:
             date_str = str(renewal.get("renewal_date"))
-            annual_value = flt(renewal.get("annual_value", 0))
+            annual_value = sales_by_customer.get(renewal.customer_id, 0)
 
-            # Assign risk level
             if annual_value >= REVENUE_HIGH_VALUE:
                 renewal["risk_level"] = "high"
             elif annual_value >= REVENUE_MEDIUM_VALUE:
