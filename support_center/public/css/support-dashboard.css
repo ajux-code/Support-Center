@@ -13,6 +13,11 @@ body > footer,
     display: none !important;
 }
 
+/* Hide website-specific navbar items (e.g. "Meeting Booking") */
+.navbar .nav-items {
+    display: none !important;
+}
+
 /* ============================================
    CSS Variables - Neutral shadcn Theme
    ============================================ */
@@ -96,9 +101,9 @@ body {
    Dashboard Container
    ============================================ */
 .support-dashboard {
-    max-width: 1400px;
+    max-width: 1200px;
     margin: 0 auto;
-    padding: 2rem;
+    padding: 1.5rem 3rem;
 }
 
 /* ============================================
