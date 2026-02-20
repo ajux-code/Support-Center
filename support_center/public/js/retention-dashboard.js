@@ -46,7 +46,7 @@ class RetentionDashboard {
             overlay.className = 'global-loading-overlay';
             overlay.innerHTML = `
                 <div class="loading-state">
-                    <div class="loading-spinner"><span></span></div>
+                    <div class="loading-spinner"></div>
                     <p style="color: var(--text-secondary); font-size: 0.875rem; margin: 0;">Loading dashboard data...</p>
                 </div>
             `;
@@ -1300,7 +1300,7 @@ class RetentionDashboard {
         document.getElementById('modal-customer-id').textContent = '';
         document.getElementById('modal-body').innerHTML = `
             <div class="loading-state">
-                <div class="loading-spinner"><span></span></div>
+                <div class="loading-spinner"></div>
                 <span>Loading customer details...</span>
             </div>
         `;
@@ -1435,7 +1435,7 @@ class RetentionDashboard {
                 </div>
                 <div class="priority-breakdown-container" style="display: none;">
                     <div class="breakdown-loading">
-                        <div class="loading-spinner"><span></span></div>
+                        <div class="loading-spinner"></div>
                         <span>Loading breakdown...</span>
                     </div>
                 </div>
@@ -1581,7 +1581,7 @@ class RetentionDashboard {
         if (!container.dataset.loaded) {
             container.innerHTML = `
                 <div class="breakdown-loading">
-                    <div class="loading-spinner"><span></span></div>
+                    <div class="loading-spinner"></div>
                     <span>Loading breakdown...</span>
                 </div>
             `;
@@ -1947,7 +1947,7 @@ class RetentionDashboard {
         this.clientsTableBody.innerHTML = `
             <tr>
                 <td colspan="9" class="loading-cell">
-                    <div class="loading-spinner"><span></span></div>
+                    <div class="loading-spinner"></div>
                     <span>Searching across all customers...</span>
                 </td>
             </tr>
@@ -2054,7 +2054,7 @@ class RetentionDashboard {
             this.clientsTableBody.innerHTML = `
                 <tr>
                     <td colspan="7" class="loading-cell">
-                        <div class="loading-spinner"><span></span></div>
+                        <div class="loading-spinner"></div>
                         <span>Loading clients...</span>
                     </td>
                 </tr>
