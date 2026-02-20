@@ -1,13 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Retention Dashboard</title>
-    <link rel="stylesheet" href="/assets/support_center/css/retention-dashboard.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-</head>
-<body>
+{% extends "templates/base.html" %}
+
+{% block title %}Retention Dashboard{% endblock %}
+
+{% block head_include %}
+<link rel="stylesheet" href="/assets/support_center/css/retention-dashboard.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
     <div class="retention-dashboard">
         <!-- Header -->
         <header class="dashboard-header">
@@ -540,17 +540,12 @@
             </div>
         </div>
     </div>
+{% endblock %}
 
-    <!-- Pass data to JavaScript -->
-    <script>
-        window.frappe = window.frappe || {};
-        window.frappe.csrf_token = "{{ csrf_token }}";
-        window.frappe.session = window.frappe.session || {};
-        window.frappe.session.user = "{{ user }}";
-        window.DASHBOARD_VIEW_MODE = "{{ view_mode }}";
-        window.DASHBOARD_CUSTOMER_ID = "{{ customer_id or '' }}";
-    </script>
-
-    <script src="/assets/support_center/js/retention-dashboard.js"></script>
-</body>
-</html>
+{% block script %}
+<script>
+    window.DASHBOARD_VIEW_MODE = "{{ view_mode }}";
+    window.DASHBOARD_CUSTOMER_ID = "{{ customer_id or '' }}";
+</script>
+<script src="/assets/support_center/js/retention-dashboard.js"></script>
+{% endblock %}

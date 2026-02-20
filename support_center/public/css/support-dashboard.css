@@ -4,6 +4,16 @@
  */
 
 /* ============================================
+   Frappe Base Template Overrides
+   ============================================ */
+/* Hide footer on dashboard pages */
+.support-dashboard ~ footer,
+body > footer,
+[data-web-block="Standard Footer"] {
+    display: none !important;
+}
+
+/* ============================================
    CSS Variables - Neutral shadcn Theme
    ============================================ */
 :root {

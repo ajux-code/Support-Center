@@ -1888,9 +1888,7 @@ class SupportDashboard {
     }
 
     getCsrfToken() {
-        if (window.frappe?.csrf_token) return window.frappe.csrf_token;
-        const match = document.cookie.match(/csrf_token=([^;]+)/);
-        return match ? decodeURIComponent(match[1]) : '';
+        return frappe.boot?.csrf_token || frappe.csrf_token || '';
     }
 
     async apiCall(method, args) {

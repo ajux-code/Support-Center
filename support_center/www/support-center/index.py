@@ -31,9 +31,6 @@ def get_context(context):
     context.user = frappe.session.user
     context.user_fullname = frappe.get_value("User", frappe.session.user, "full_name") or frappe.session.user
 
-    # Pass CSRF token for API calls
-    context.csrf_token = frappe.sessions.get_csrf_token()
-
     # Default values
     context.record_id = None
     context.record_type = None
