@@ -362,37 +362,3 @@ def validate_months_period(months):
         )
 
     return months
-
-
-def sanitize_search_query(search_query):
-    """
-    Sanitize search query to prevent SQL injection.
-
-    Args:
-        search_query (str): User-provided search string.
-
-    Returns:
-        str: Sanitized search query safe for SQL LIKE clauses.
-
-    Example:
-        >>> sanitize_search_query("ABC Corp")  # Returns "%ABC Corp%"
-        >>> sanitize_search_query("'; DROP TABLE--")  # Returns safely escaped version
-    """
-    if not search_query:
-        return None
-
-    # Remove potentially dangerous characters
-    # Allow alphanumeric, spaces, hyphens, underscores, dots, and common punctuation
-    search_query = str(search_query).strip()
-
-    # Escape special SQL characters
-    search_query = search_query.replace("\\", "\\\\")
-    search_query = search_query.replace("%", "\\%")
-    search_query = search_query.replace("_", "\\_")
-    search_query = search_query.replace("'", "\\'")
-
-    # Limit length to prevent DoS
-    if len(search_query) > 100:
-        search_query = search_query[:100]
-
-    return f"%{search_query}%" if search_query else None

@@ -435,14 +435,14 @@
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
-                        <label for="customer-search">Search for customer</label>
+                        <label for="link-customer-search">Search for customer</label>
                         <input
                             type="text"
-                            id="customer-search"
+                            id="link-customer-search"
                             placeholder="Search by name, email, or phone..."
                             autocomplete="off"
                         >
-                        <div class="customer-search-results" id="customer-search-results" style="display: none;">
+                        <div class="customer-search-results" id="link-customer-search-results" style="display: none;">
                             <!-- Results will be populated dynamically -->
                         </div>
                     </div>
@@ -1065,11 +1065,11 @@
 {% block script %}
 <script>
     // View mode and record info for routing
-    window.DASHBOARD_VIEW_MODE = "{{ view_mode }}";
-    window.DASHBOARD_RECORD_ID = "{{ record_id or '' }}";
-    window.DASHBOARD_RECORD_TYPE = "{{ record_type or '' }}";
+    window.DASHBOARD_VIEW_MODE = {{ (view_mode or '')|tojson }};
+    window.DASHBOARD_RECORD_ID = {{ (record_id or '')|tojson }};
+    window.DASHBOARD_RECORD_TYPE = {{ (record_type or '')|tojson }};
     // Keep backward compatibility
-    window.DASHBOARD_CUSTOMER_ID = "{{ customer_id or '' }}";
+    window.DASHBOARD_CUSTOMER_ID = {{ (customer_id or '')|tojson }};
 </script>
 <script src="/assets/support_center/js/support-dashboard.js"></script>
 {% endblock %}

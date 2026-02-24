@@ -1,7 +1,6 @@
 """
 Customer Lookup API for Support Dashboard
 Provides fast search and data retrieval for customer support workflows
-# test comment
 """
 
 import frappe
@@ -418,18 +417,14 @@ def search_customers_paginated(query, limit=20, offset=0, category=None):
 def get_category_counts(query=''):
     """
     Get counts for each category based on the current search query.
-    Used to populate tab badges in the filter UI.
+    Uses COUNT(*) SQL queries instead of fetching all rows.
 
     Args:
         query: Optional search string to filter by
 
     Returns:
-        dict with counts per category: {'contact': N, 'customer': N, 'booking': N}
+        dict with counts per category: {'contact': N, 'customer': N, 'booking': N, 'ticket': N}
     """
-    # Get all results matching the query
-    all_results = _get_all_search_results(query if query else None)
-
-    # Count by type
     counts = {
         'contact': 0,
         'customer': 0,
@@ -437,10 +432,64 @@ def get_category_counts(query=''):
         'ticket': 0
     }
 
-    for result in all_results:
-        result_type = result.get('type')
-        if result_type in counts:
-            counts[result_type] += 1
+    if query and len(query) < 2:
+        return counts
+
+    if query:
+        query_param = f"%{query}%"
+        phone_query = query.replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+        phone_param = f"%{phone_query}%"
+
+        counts['customer'] = frappe.db.sql("""
+            SELECT COUNT(*) FROM `tabCustomer`
+            WHERE (customer_name LIKE %(q)s OR email_id LIKE %(q)s
+                   OR mobile_no LIKE %(q)s OR name LIKE %(q)s
+                   OR REPLACE(REPLACE(REPLACE(REPLACE(mobile_no, '-', ''), ' ', ''), '(', ''), ')', '') LIKE %(pq)s)
+            AND disabled = 0
+        """, {"q": query_param, "pq": phone_param})[0][0]
+
+        counts['contact'] = frappe.db.sql("""
+            SELECT COUNT(*) FROM `tabContact`
+            WHERE first_name LIKE %(q)s OR last_name LIKE %(q)s
+                  OR email_id LIKE %(q)s OR phone LIKE %(q)s
+                  OR mobile_no LIKE %(q)s OR name LIKE %(q)s
+                  OR REPLACE(REPLACE(REPLACE(REPLACE(mobile_no, '-', ''), ' ', ''), '(', ''), ')', '') LIKE %(pq)s
+        """, {"q": query_param, "pq": phone_param})[0][0]
+
+        counts['ticket'] = frappe.db.sql("""
+            SELECT COUNT(*) FROM `tabIssue` i
+            LEFT JOIN `tabCustomer` c ON i.customer = c.name
+            WHERE i.subject LIKE %(q)s OR i.name LIKE %(q)s
+                  OR i.raised_by LIKE %(q)s OR i.customer_name LIKE %(q)s
+                  OR c.customer_name LIKE %(q)s
+        """, {"q": query_param})[0][0]
+
+        if _meeting_manager_installed():
+            counts['booking'] = frappe.db.sql("""
+                SELECT COUNT(*) FROM `tabMM Meeting Booking` mb
+                LEFT JOIN `tabMM Customer` mc ON mb.customer = mc.name
+                WHERE mc.customer_name LIKE %(q)s
+                      OR mb.customer_email_at_booking LIKE %(q)s
+                      OR mb.customer_phone_at_booking LIKE %(q)s
+                      OR mb.name LIKE %(q)s
+            """, {"q": query_param})[0][0]
+    else:
+        counts['customer'] = frappe.db.sql(
+            "SELECT COUNT(*) FROM `tabCustomer` WHERE disabled = 0"
+        )[0][0]
+
+        counts['contact'] = frappe.db.sql(
+            "SELECT COUNT(*) FROM `tabContact`"
+        )[0][0]
+
+        counts['ticket'] = frappe.db.sql(
+            "SELECT COUNT(*) FROM `tabIssue`"
+        )[0][0]
+
+        if _meeting_manager_installed():
+            counts['booking'] = frappe.db.sql(
+                "SELECT COUNT(*) FROM `tabMM Meeting Booking`"
+            )[0][0]
 
     return counts
 
@@ -467,6 +516,7 @@ def _get_all_search_results(query):
             FROM `tabCustomer`
             WHERE disabled = 0
             ORDER BY modified DESC
+            LIMIT 5000
         """, as_dict=True)
 
         for customer in customers:
@@ -490,6 +540,7 @@ def _get_all_search_results(query):
                 phone, mobile_no, company_name, modified
             FROM `tabContact`
             ORDER BY modified DESC
+            LIMIT 5000
         """, as_dict=True)
 
         for contact in contacts:
@@ -517,6 +568,7 @@ def _get_all_search_results(query):
             WHERE enabled = 1
             AND name NOT IN ('Administrator', 'Guest')
             ORDER BY modified DESC
+            LIMIT 5000
         """, as_dict=True)
 
         for user in users:
@@ -550,6 +602,7 @@ def _get_all_search_results(query):
                 FROM `tabMM Meeting Booking` mb
                 LEFT JOIN `tabMM Customer` mc ON mb.customer = mc.name
                 ORDER BY mb.modified DESC
+                LIMIT 5000
             """, as_dict=True)
 
             for booking in bookings:
@@ -579,6 +632,7 @@ def _get_all_search_results(query):
             FROM `tabIssue` i
             LEFT JOIN `tabCustomer` c ON i.customer = c.name
             ORDER BY i.modified DESC
+            LIMIT 5000
         """, as_dict=True)
 
         for ticket in tickets:
@@ -627,6 +681,7 @@ def _get_all_search_results(query):
             OR name LIKE %(query)s)
             AND disabled = 0
         ORDER BY modified DESC
+        LIMIT 500
     """, {"query": query_param, "phone_query": phone_param}, as_dict=True)
 
     for customer in customers:
@@ -656,6 +711,7 @@ def _get_all_search_results(query):
             OR REPLACE(REPLACE(REPLACE(REPLACE(mobile_no, '-', ''), ' ', ''), '(', ''), ')', '') LIKE %(phone_query)s
             OR name LIKE %(query)s)
         ORDER BY modified DESC
+        LIMIT 500
     """, {"query": query_param, "phone_query": phone_param}, as_dict=True)
 
     for contact in contacts:
@@ -687,6 +743,7 @@ def _get_all_search_results(query):
             AND enabled = 1
             AND name NOT IN ('Administrator', 'Guest')
         ORDER BY modified DESC
+        LIMIT 500
     """, {"query": query_param}, as_dict=True)
 
     for user in users:
@@ -723,6 +780,7 @@ def _get_all_search_results(query):
                 OR mb.customer_phone_at_booking LIKE %(query)s
                 OR mb.name LIKE %(query)s)
             ORDER BY mb.modified DESC
+            LIMIT 500
         """, {"query": query_param}, as_dict=True)
 
         for booking in bookings:
@@ -749,6 +807,7 @@ def _get_all_search_results(query):
         WHERE
             so.name LIKE %(query)s
             AND so.docstatus < 2
+        LIMIT 500
     """, {"query": query_param}, as_dict=True)
 
     for order in orders:
@@ -781,6 +840,7 @@ def _get_all_search_results(query):
             OR i.customer_name LIKE %(query)s
             OR c.customer_name LIKE %(query)s)
         ORDER BY i.modified DESC
+        LIMIT 500
     """, {"query": query_param}, as_dict=True)
 
     for ticket in tickets:
@@ -1077,7 +1137,8 @@ def get_support_history(customer_id, limit=10):
 
             booking_where = " OR ".join(booking_filters) if booking_filters else "1=0"
 
-            bookings = frappe.db.sql(f"""
+            # booking_where only contains hardcoded column comparisons with %(param)s placeholders
+            bookings = frappe.db.sql("""
                 SELECT
                     mb.name,
                     mb.start_datetime,
@@ -1094,7 +1155,7 @@ def get_support_history(customer_id, limit=10):
                 AND mb.booking_status NOT IN ('Cancelled')
                 ORDER BY mb.start_datetime DESC
                 LIMIT %(limit)s
-            """, booking_params, as_dict=True)
+            """.format(booking_where=booking_where), booking_params, as_dict=True)
 
         for booking in bookings:
             # Get assigned user

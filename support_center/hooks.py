@@ -37,7 +37,8 @@ add_to_apps_screen = [
 # app_include_js = "/assets/support_center/js/support_center.js"
 
 # include js, css files in header of web template
-web_include_css = "/assets/support_center/css/support-dashboard.css"
+# CSS is included per-page in {% block head_include %} instead of globally
+# web_include_css = "/assets/support_center/css/support-dashboard.css"
 # web_include_js = "/assets/support_center/js/support_center.js"
 
 # include custom scss in every website theme (without file extension ".scss")
@@ -83,6 +84,7 @@ web_include_css = "/assets/support_center/css/support-dashboard.css"
 
 website_route_rules = [
     {"from_route": "/support-center", "to_route": "support-center"},
+    {"from_route": "/retention-dashboard", "to_route": "retention-dashboard"},
 ]
 
 # Jinja
@@ -267,7 +269,7 @@ website_route_rules = [
 fixtures = [
 	{
 		"doctype": "Page",
-		"filters": [["name", "in", ["support-center"]]]
+		"filters": [["name", "in", ["support-center", "retention-dashboard"]]]
 	},
 	{
 		"doctype": "Custom Field",

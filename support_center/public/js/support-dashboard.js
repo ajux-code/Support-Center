@@ -341,7 +341,6 @@ class SupportDashboard {
 
     loadRecord(recordId, recordType) {
         // Navigate to dedicated record detail page using appropriate query parameter
-        console.log('loadRecord called with:', { recordId, recordType }); // Debug log
         const paramMap = {
             'customer': 'customer',
             'booking': 'booking',
@@ -350,7 +349,6 @@ class SupportDashboard {
             'ticket': 'ticket'
         };
         const param = paramMap[recordType] || 'customer';
-        console.log('Navigating to param:', param); // Debug log
         window.location.href = `/support-center?${param}=${encodeURIComponent(recordId)}`;
     }
 
@@ -432,7 +430,7 @@ class SupportDashboard {
                 <div class="error-state">
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load customer data</h2>
-                    <p>${error.message || 'Please try again'}</p>
+                    <p>${this.escapeHtml(error.message || 'Please try again')}</p>
                     <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
@@ -466,7 +464,7 @@ class SupportDashboard {
                 <div class="error-state">
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load booking data</h2>
-                    <p>${error.message || 'Please try again'}</p>
+                    <p>${this.escapeHtml(error.message || 'Please try again')}</p>
                     <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
@@ -500,7 +498,7 @@ class SupportDashboard {
                 <div class="error-state">
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load contact data</h2>
-                    <p>${error.message || 'Please try again'}</p>
+                    <p>${this.escapeHtml(error.message || 'Please try again')}</p>
                     <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
@@ -534,7 +532,7 @@ class SupportDashboard {
                 <div class="error-state">
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load user data</h2>
-                    <p>${error.message || 'Please try again'}</p>
+                    <p>${this.escapeHtml(error.message || 'Please try again')}</p>
                     <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
@@ -568,7 +566,7 @@ class SupportDashboard {
                 <div class="error-state">
                     <div class="error-icon">⚠️</div>
                     <h2>Failed to load ticket data</h2>
-                    <p>${error.message || 'Please try again'}</p>
+                    <p>${this.escapeHtml(error.message || 'Please try again')}</p>
                     <a href="/support-center" class="btn-primary">Back to Dashboard</a>
                 </div>
             `;
@@ -587,10 +585,12 @@ class SupportDashboard {
         this.setFieldValue(content, 'raised_by', ticket.raised_by || 'Unknown');
         this.setFieldValue(content, 'opening_date', this.formatDate(ticket.opening_date));
 
-        // Set description (may contain HTML)
+        // Set description (sanitize to prevent XSS)
         const descriptionEl = content.querySelector('[data-field="description"]');
         if (descriptionEl) {
-            descriptionEl.innerHTML = ticket.description || '<em>No description provided</em>';
+            descriptionEl.textContent = ticket.description
+                ? ticket.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+                : 'No description provided';
         }
 
         // Status badge with color coding
@@ -625,7 +625,7 @@ class SupportDashboard {
                 resolutionCard.style.display = 'block';
                 const resolutionEl = content.querySelector('[data-field="resolution_details"]');
                 if (resolutionEl) {
-                    resolutionEl.innerHTML = ticket.resolution_details;
+                    resolutionEl.textContent = ticket.resolution_details.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
                 }
             }
         }
@@ -661,7 +661,7 @@ class SupportDashboard {
                 <div class="history-content">
                     <div class="history-title">${this.escapeHtml(comment.subject || comment.type || 'Communication')}</div>
                     <div class="history-meta">${this.escapeHtml(comment.sender || '')} • ${this.formatDateTime(comment.date)}</div>
-                    ${comment.content ? `<div class="history-notes">${comment.content.substring(0, 200)}${comment.content.length > 200 ? '...' : ''}</div>` : ''}
+                    ${comment.content ? `<div class="history-notes">${this.escapeHtml(comment.content.substring(0, 200))}${comment.content.length > 200 ? '...' : ''}</div>` : ''}
                 </div>
             </div>
         `).join('');
@@ -677,17 +677,24 @@ class SupportDashboard {
         }
 
         container.innerHTML = tickets.map(ticket => `
-            <div class="history-item" style="cursor: pointer;" onclick="dashboard.loadRecord('${ticket.name}', 'ticket')">
+            <div class="history-item related-ticket-item" style="cursor: pointer;" data-ticket-id="${this.escapeHtml(ticket.name)}">
                 <div class="history-icon">🎫</div>
                 <div class="history-content">
                     <div class="history-title">${this.escapeHtml(ticket.subject)}</div>
                     <div class="history-meta">
-                        <span class="status-badge status-${ticket.status.toLowerCase().replace(/\s+/g, '-')}">${ticket.status}</span>
+                        <span class="status-badge status-${this.escapeHtml(ticket.status.toLowerCase().replace(/\s+/g, '-'))}">${this.escapeHtml(ticket.status)}</span>
                         • ${this.formatDate(ticket.opening_date)}
                     </div>
                 </div>
             </div>
         `).join('');
+
+        // Bind click handlers via addEventListener instead of inline onclick
+        container.querySelectorAll('.related-ticket-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.loadRecord(item.dataset.ticketId, 'ticket');
+            });
+        });
     }
 
     setupTicketEventListeners(content, ticket) {
@@ -886,10 +893,8 @@ class SupportDashboard {
      */
     renderCustomerListRows(customers, tbody) {
         tbody.innerHTML = '';
-        console.log('renderCustomerListRows - customers:', customers); // Debug log
 
         customers.forEach(customer => {
-            console.log('Rendering row for:', { id: customer.id, type: customer.type, name: customer.name }); // Debug log
             const row = document.createElement('tr');
 
             // Get source badge with appropriate styling
@@ -2797,8 +2802,8 @@ class SupportDashboard {
         this.selectedCustomerForLinking = null;
 
         const modal = document.getElementById('link-customer-modal');
-        const searchInput = document.getElementById('customer-search');
-        const resultsContainer = document.getElementById('customer-search-results');
+        const searchInput = document.getElementById('link-customer-search');
+        const resultsContainer = document.getElementById('link-customer-search-results');
         const selectedContainer = document.getElementById('selected-customer');
         const confirmBtn = modal.querySelector('[data-action="confirm-link-customer"]');
 
@@ -2812,7 +2817,7 @@ class SupportDashboard {
         modal.style.display = 'flex';
 
         // Setup search input listener
-        const linkSearchInput = document.getElementById('customer-search');
+        const linkSearchInput = document.getElementById('link-customer-search');
         if (linkSearchInput) {
             linkSearchInput.focus();
 
@@ -2852,8 +2857,8 @@ class SupportDashboard {
         modal.querySelector('[data-action="clear-customer-selection"]')?.addEventListener('click', () => {
             this.selectedCustomerForLinking = null;
             document.getElementById('selected-customer').style.display = 'none';
-            document.getElementById('customer-search-results').style.display = 'none';
-            document.getElementById('customer-search').value = '';
+            document.getElementById('link-customer-search-results').style.display = 'none';
+            document.getElementById('link-customer-search').value = '';
             modal.querySelector('[data-action="confirm-link-customer"]').disabled = true;
         });
 
@@ -2893,7 +2898,7 @@ class SupportDashboard {
     }
 
     async searchCustomersForLinking(query) {
-        const resultsContainer = document.getElementById('customer-search-results');
+        const resultsContainer = document.getElementById('link-customer-search-results');
 
         try {
             const results = await this.apiCall('support_center.api.customer_lookup.search_customers_for_linking', {
@@ -2938,7 +2943,7 @@ class SupportDashboard {
     selectCustomerForLinking(customer) {
         this.selectedCustomerForLinking = customer;
 
-        const resultsContainer = document.getElementById('customer-search-results');
+        const resultsContainer = document.getElementById('link-customer-search-results');
         const selectedContainer = document.getElementById('selected-customer');
         const modal = document.getElementById('link-customer-modal');
 

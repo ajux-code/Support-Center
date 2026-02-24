@@ -279,6 +279,8 @@ class RetentionDashboard {
                     if (targetSection && targetSection.style.display === 'none') {
                         targetSection.style.display = 'block';
                     }
+                    // Load calendar data
+                    this.loadCalendarData();
                 } else if (targetTab === 'clients') {
                     targetSection = document.querySelector('.clients-section');
                 } else if (targetTab === 'analytics') {
@@ -490,16 +492,11 @@ class RetentionDashboard {
 
         // Add event listeners using event delegation (more reliable)
         setTimeout(() => {
-            console.log('Setting up consolidated success button handlers...');
-
             // Use event delegation on the parent container
             const successContainer = document.querySelector('.consolidated-success');
             if (!successContainer) {
-                console.warn('Consolidated success container not found');
                 return;
             }
-
-            console.log('Found consolidated success container');
 
             // Attach single delegated listener
             successContainer.addEventListener('click', (e) => {
@@ -510,7 +507,6 @@ class RetentionDashboard {
                 if (calendarBtn) {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log('✓ Calendar button clicked - navigating to calendar section');
 
                     // Navigate to calendar section (same logic as quick-action-card)
                     const calendarSection = document.getElementById('full-calendar-section');
@@ -519,6 +515,8 @@ class RetentionDashboard {
                         if (calendarSection.style.display === 'none') {
                             calendarSection.style.display = 'block';
                         }
+                        // Load calendar data
+                        this.loadCalendarData();
                         // Smooth scroll to the section
                         calendarSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -542,7 +540,6 @@ class RetentionDashboard {
                 if (analyticsBtn) {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log('✓ Analytics button clicked - navigating to analytics section');
 
                     // Navigate to analytics section (same logic as quick-action-card)
                     const analyticsSection = document.getElementById('analytics-section');
@@ -564,7 +561,6 @@ class RetentionDashboard {
                 }
             });
 
-            console.log('✓ Button handlers attached successfully');
         }, 100);
     }
 
@@ -1369,11 +1365,11 @@ class RetentionDashboard {
                         </div>
                         <div class="overview-item">
                             <span class="overview-label">Email</span>
-                            <span class="overview-value">${customer.email || '-'}</span>
+                            <span class="overview-value">${this.escapeHtml(customer.email || '-')}</span>
                         </div>
                         <div class="overview-item">
                             <span class="overview-label">Phone</span>
-                            <span class="overview-value">${customer.phone || '-'}</span>
+                            <span class="overview-value">${this.escapeHtml(customer.phone || '-')}</span>
                         </div>
                     </div>
                 </div>
@@ -2433,6 +2429,11 @@ class RetentionDashboard {
             if (requestTracker.cancelled) return;
 
             console.error('Failed to load calendar data:', error);
+            if (monthLabel) {
+                const monthNames = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+                monthLabel.textContent = `${monthNames[this.calendarMonth - 1]} ${this.calendarYear}`;
+            }
             if (calendarGrid) {
                 calendarGrid.innerHTML = `
                     <div class="calendar-error">

@@ -4,7 +4,7 @@
 
 {% block head_include %}
 <link rel="stylesheet" href="/assets/support_center/css/retention-dashboard.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="/assets/support_center/js/vendor/chart.umd.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -535,8 +535,8 @@
 
 {% block script %}
 <script>
-    window.DASHBOARD_VIEW_MODE = "{{ view_mode }}";
-    window.DASHBOARD_CUSTOMER_ID = "{{ customer_id or '' }}";
+    window.DASHBOARD_VIEW_MODE = {{ (view_mode or '')|tojson }};
+    window.DASHBOARD_CUSTOMER_ID = {{ (customer_id or '')|tojson }};
 </script>
 <script src="/assets/support_center/js/retention-dashboard.js"></script>
 {% endblock %}

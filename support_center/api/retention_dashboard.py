@@ -86,15 +86,13 @@ SO_CUSTOM_FIELDS = [
     "custom_salesperson",
 ]
 
-# Cache for available custom fields (checked once per request)
-_available_fields_cache = {}
-
-
 def get_available_so_fields():
     """Check which custom fields actually exist on the Sales Order table.
-    Caches per request to avoid repeated DB lookups."""
-    if _available_fields_cache.get("sales_order"):
-        return _available_fields_cache["sales_order"]
+    Caches per request using frappe.local to avoid stale data across workers."""
+    cache_key = "_retention_so_fields_cache"
+    cached = getattr(frappe.local, cache_key, None)
+    if cached is not None:
+        return cached
 
     available = set()
     meta = frappe.get_meta("Sales Order")
@@ -102,7 +100,7 @@ def get_available_so_fields():
         if meta.has_field(field_name):
             available.add(field_name)
 
-    _available_fields_cache["sales_order"] = available
+    setattr(frappe.local, cache_key, available)
     return available
 
 
@@ -207,6 +205,37 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
         # Uses derived tables to pre-aggregate data per customer
         products_col = "GROUP_CONCAT(DISTINCT so.custom_product) as products_purchased" if has_so_field("custom_product") else "NULL as products_purchased"
 
+        # Build SQL-level status filter to match calculate_renewal_status() logic
+        # This ensures LIMIT/OFFSET pagination is applied AFTER status filtering
+        status_where = ""
+        if status_filter == "overdue":
+            status_where = """
+            AND (
+                (sub_data.next_renewal_date IS NOT NULL AND sub_data.next_renewal_date < %(today)s)
+                OR (sub_data.next_renewal_date IS NULL AND order_data.last_order_date IS NOT NULL
+                    AND DATEDIFF(%(today)s, order_data.last_order_date) > {days_critical})
+            )""".format(days_critical=DAYS_INACTIVE_CRITICAL)
+        elif status_filter == "due_soon":
+            status_where = """
+            AND (
+                (sub_data.next_renewal_date IS NOT NULL
+                    AND sub_data.next_renewal_date >= %(today)s
+                    AND sub_data.next_renewal_date <= %(due_soon_date)s)
+                OR (sub_data.next_renewal_date IS NULL AND order_data.last_order_date IS NOT NULL
+                    AND DATEDIFF(%(today)s, order_data.last_order_date) > {days_warning}
+                    AND DATEDIFF(%(today)s, order_data.last_order_date) <= {days_critical})
+            )""".format(days_warning=DAYS_INACTIVE_WARNING, days_critical=DAYS_INACTIVE_CRITICAL)
+        elif status_filter == "active":
+            status_where = """
+            AND (
+                (sub_data.next_renewal_date IS NOT NULL AND sub_data.next_renewal_date > %(due_soon_date)s)
+                OR (sub_data.next_renewal_date IS NULL AND order_data.last_order_date IS NOT NULL
+                    AND DATEDIFF(%(today)s, order_data.last_order_date) <= {days_warning})
+                OR (sub_data.next_renewal_date IS NULL AND order_data.last_order_date IS NULL)
+            )""".format(days_warning=DAYS_INACTIVE_WARNING)
+
+        due_soon_threshold_date = add_days(today, DAYS_DUE_SOON_THRESHOLD)
+
         customers = frappe.db.sql("""
         SELECT
             c.name as customer_id,
@@ -257,9 +286,16 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
             GROUP BY com.reference_name
         ) as contact_data ON contact_data.customer = c.name
         WHERE c.disabled = 0
+        {status_where}
         ORDER BY order_data.last_order_date DESC
         LIMIT %(limit)s OFFSET %(offset)s
-        """.format(products_col=products_col), {"limit": cint(limit), "offset": cint(offset)}, as_dict=True)
+        """.format(products_col=products_col, status_where=status_where),
+        {
+            "limit": cint(limit),
+            "offset": cint(offset),
+            "today": today,
+            "due_soon_date": due_soon_threshold_date,
+        }, as_dict=True)
 
         query_time = time.time() - query_start
         frappe.logger().info(f"Client list query completed in {query_time:.3f}s for {len(customers)} customers (filter: {status_filter})")
@@ -272,10 +308,6 @@ def get_clients_by_renewal_status(status_filter=None, days_range=DAYS_RENEWAL_WI
                 customer.get("last_order_date"),
                 today
             )
-
-            # Apply filter if specified
-            if status_filter and renewal_status != status_filter:
-                continue
 
             customer["renewal_status"] = renewal_status
             customer["renewal_date"] = customer.get("next_renewal_date")
@@ -617,62 +649,59 @@ def get_trend_data(months=12):
                 "short_label": month_start.strftime("%b")
             })
 
-        # Get order counts and revenue by month
+        # Single aggregated query instead of 3-4 queries per month
         has_order_type = has_so_field("custom_order_type")
+        period_start = month_data[0]["month_start"]
+        period_end = month_data[-1]["month_end"]
+
+        if has_order_type:
+            monthly_stats = frappe.db.sql("""
+                SELECT
+                    DATE_FORMAT(transaction_date, '%%Y-%%m-01') as month_key,
+                    COUNT(*) as total_orders,
+                    SUM(CASE WHEN custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+                        THEN 1 ELSE 0 END) as renewal_count,
+                    SUM(CASE WHEN custom_order_type IN ('New Order Private', 'New Order Business')
+                        THEN 1 ELSE 0 END) as new_count,
+                    COALESCE(SUM(grand_total), 0) as total_revenue,
+                    COALESCE(SUM(CASE WHEN custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
+                        THEN grand_total ELSE 0 END), 0) as renewal_revenue,
+                    COALESCE(SUM(CASE WHEN custom_order_type IN ('New Order Private', 'New Order Business')
+                        THEN grand_total ELSE 0 END), 0) as new_revenue
+                FROM `tabSales Order`
+                WHERE docstatus = 1
+                AND transaction_date BETWEEN %(start)s AND %(end)s
+                GROUP BY DATE_FORMAT(transaction_date, '%%Y-%%m-01')
+            """, {"start": period_start, "end": period_end}, as_dict=True)
+        else:
+            monthly_stats = frappe.db.sql("""
+                SELECT
+                    DATE_FORMAT(transaction_date, '%%Y-%%m-01') as month_key,
+                    COUNT(*) as total_orders,
+                    0 as renewal_count,
+                    0 as new_count,
+                    COALESCE(SUM(grand_total), 0) as total_revenue,
+                    0 as renewal_revenue,
+                    0 as new_revenue
+                FROM `tabSales Order`
+                WHERE docstatus = 1
+                AND transaction_date BETWEEN %(start)s AND %(end)s
+                GROUP BY DATE_FORMAT(transaction_date, '%%Y-%%m-01')
+            """, {"start": period_start, "end": period_end}, as_dict=True)
+
+        # Index by month key for O(1) lookup
+        stats_by_month = {str(row.month_key): row for row in monthly_stats}
+
         results = []
         for month in month_data:
-            # Total orders for the month
-            total_orders = frappe.db.count("Sales Order", {
-                "docstatus": 1,
-                "transaction_date": ["between", [month["month_start"], month["month_end"]]]
-            })
+            row = stats_by_month.get(month["month_start"], {})
+            total_orders = cint(row.get("total_orders", 0))
+            renewal_count = cint(row.get("renewal_count", 0))
+            new_count = cint(row.get("new_count", 0))
 
-            renewal_count = 0
-            new_count = 0
-
-            if has_order_type:
-                # Count renewal orders
-                renewal_count = frappe.db.count("Sales Order", {
-                    "docstatus": 1,
-                    "custom_order_type": ["in", ["Renewal", "Extension Private", "Extension Business"]],
-                    "transaction_date": ["between", [month["month_start"], month["month_end"]]]
-                })
-
-                # Count new orders
-                new_count = frappe.db.count("Sales Order", {
-                    "docstatus": 1,
-                    "custom_order_type": ["in", ["New Order Private", "New Order Business"]],
-                    "transaction_date": ["between", [month["month_start"], month["month_end"]]]
-                })
-
-            # Calculate renewal rate
             renewal_rate = 0
             if total_orders > 0 and has_order_type:
                 renewal_rate = round((renewal_count / total_orders) * 100, 1)
-
-            # Get revenue
-            if has_order_type:
-                revenue_data = frappe.db.sql("""
-                    SELECT
-                        COALESCE(SUM(grand_total), 0) as total_revenue,
-                        COALESCE(SUM(CASE WHEN custom_order_type IN ('Renewal', 'Extension Private', 'Extension Business')
-                            THEN grand_total ELSE 0 END), 0) as renewal_revenue,
-                        COALESCE(SUM(CASE WHEN custom_order_type IN ('New Order Private', 'New Order Business')
-                            THEN grand_total ELSE 0 END), 0) as new_revenue
-                    FROM `tabSales Order`
-                    WHERE docstatus = 1
-                    AND transaction_date BETWEEN %(start)s AND %(end)s
-                """, {"start": month["month_start"], "end": month["month_end"]}, as_dict=True)[0]
-            else:
-                revenue_data = frappe.db.sql("""
-                    SELECT
-                        COALESCE(SUM(grand_total), 0) as total_revenue,
-                        0 as renewal_revenue,
-                        0 as new_revenue
-                    FROM `tabSales Order`
-                    WHERE docstatus = 1
-                    AND transaction_date BETWEEN %(start)s AND %(end)s
-                """, {"start": month["month_start"], "end": month["month_end"]}, as_dict=True)[0]
 
             results.append({
                 "label": month["label"],
@@ -682,9 +711,9 @@ def get_trend_data(months=12):
                 "new_count": new_count,
                 "total_orders": total_orders,
                 "renewal_rate": renewal_rate,
-                "total_revenue": flt(revenue_data.get("total_revenue", 0), 2),
-                "renewal_revenue": flt(revenue_data.get("renewal_revenue", 0), 2),
-                "new_revenue": flt(revenue_data.get("new_revenue", 0), 2)
+                "total_revenue": flt(row.get("total_revenue", 0), 2),
+                "renewal_revenue": flt(row.get("renewal_revenue", 0), 2),
+                "new_revenue": flt(row.get("new_revenue", 0), 2)
             })
 
         # Log access
@@ -1658,6 +1687,13 @@ def mark_customer_contacted(customer_id, contact_type="call", notes=None):
         # Validate customer exists
         if not frappe.db.exists("Customer", customer_id):
             frappe.throw(_("Customer not found"), frappe.DoesNotExistError)
+
+        # Verify user can access this customer's retention data
+        if not can_access_customer_retention(customer_id):
+            frappe.throw(
+                _("You do not have permission to log contact for this customer"),
+                frappe.PermissionError
+            )
 
         # Validate contact type
         valid_types = ["call", "email", "meeting", "other"]

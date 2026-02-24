@@ -346,10 +346,13 @@ def seed_all_data(clear_existing=False):
     }
 
 
-# Convenience function for API access
+# Convenience function for API access — only available in developer mode
 @frappe.whitelist()
 def run_seed(clear_existing=False):
-    """API endpoint to run seeding from the browser"""
+    """API endpoint to run seeding from the browser (developer mode only)"""
+    if not frappe.conf.developer_mode:
+        frappe.throw("Seed data is only available in developer mode")
+
     if not frappe.has_permission("Customer", "create"):
         frappe.throw("You don't have permission to create test data")
 
