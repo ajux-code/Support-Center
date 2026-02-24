@@ -39,9 +39,12 @@ class SupportDashboard {
         this.timelineLoaded = 0;
         this.timelineHasMore = false;
 
+        this.paletteActiveIndex = 0;
+
         this.initializeEventListeners();
         this.setupKeyboardShortcuts();
         this.initializeCategoryTabs();
+        this.initializeCommandPalette();
         this.initializeFromURL();
 
         // Check if we should load a specific record (from URL query param)
@@ -244,18 +247,35 @@ class SupportDashboard {
 
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
-            // Ctrl+K or / to focus search (unless already in an input)
-            if ((e.ctrlKey && e.key === 'k') || (e.key === '/' && !this.isInputFocused())) {
+            // ⌘+K or Ctrl+K to toggle command palette
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
                 e.preventDefault();
-                this.searchInput.focus();
-                this.searchInput.select();
+                this.toggleCommandPalette();
+                return;
             }
 
-            // Escape to clear search
-            if (e.key === 'Escape' && this.searchInput.matches(':focus')) {
-                this.searchInput.value = '';
-                this.suggestionsBox.style.display = 'none';
-                this.searchInput.blur();
+            // / to focus search (unless in an input or palette is open)
+            if (e.key === '/' && !this.isInputFocused()) {
+                const palette = document.getElementById('command-palette');
+                if (!palette || !palette.classList.contains('open')) {
+                    e.preventDefault();
+                    this.searchInput.focus();
+                    this.searchInput.select();
+                }
+            }
+
+            // Escape: close palette first, then clear search
+            if (e.key === 'Escape') {
+                const palette = document.getElementById('command-palette');
+                if (palette && palette.classList.contains('open')) {
+                    this.closeCommandPalette();
+                    return;
+                }
+                if (this.searchInput.matches(':focus')) {
+                    this.searchInput.value = '';
+                    this.suggestionsBox.style.display = 'none';
+                    this.searchInput.blur();
+                }
             }
         });
     }
@@ -386,13 +406,8 @@ class SupportDashboard {
         this.timelineLoaded = 0;
         this.timelineHasMore = false;
 
-        // Show loading state
-        this.contentContainer.innerHTML = `
-            <div class="loading-state">
-                <div class="loading-spinner"></div>
-                <p>Loading customer data...</p>
-            </div>
-        `;
+        // Show skeleton loading state
+        this.contentContainer.innerHTML = this.renderDetailSkeleton();
 
         try {
             // Parallel API calls for maximum speed
@@ -442,13 +457,8 @@ class SupportDashboard {
         this.showingCustomerList = false;
         this.currentRecordType = 'booking';
 
-        // Show loading state
-        this.contentContainer.innerHTML = `
-            <div class="loading-state">
-                <div class="loading-spinner"></div>
-                <p>Loading booking data...</p>
-            </div>
-        `;
+        // Show skeleton loading state
+        this.contentContainer.innerHTML = this.renderDetailSkeleton();
 
         try {
             const bookingData = await this.apiCall('support_center.api.customer_lookup.get_booking_details', {
@@ -476,13 +486,8 @@ class SupportDashboard {
         this.showingCustomerList = false;
         this.currentRecordType = 'contact';
 
-        // Show loading state
-        this.contentContainer.innerHTML = `
-            <div class="loading-state">
-                <div class="loading-spinner"></div>
-                <p>Loading contact data...</p>
-            </div>
-        `;
+        // Show skeleton loading state
+        this.contentContainer.innerHTML = this.renderDetailSkeleton();
 
         try {
             const contactData = await this.apiCall('support_center.api.customer_lookup.get_contact_details', {
@@ -510,13 +515,8 @@ class SupportDashboard {
         this.showingCustomerList = false;
         this.currentRecordType = 'user';
 
-        // Show loading state
-        this.contentContainer.innerHTML = `
-            <div class="loading-state">
-                <div class="loading-spinner"></div>
-                <p>Loading user data...</p>
-            </div>
-        `;
+        // Show skeleton loading state
+        this.contentContainer.innerHTML = this.renderDetailSkeleton();
 
         try {
             const userData = await this.apiCall('support_center.api.customer_lookup.get_user_details', {
@@ -544,13 +544,8 @@ class SupportDashboard {
         this.showingCustomerList = false;
         this.currentRecordType = 'ticket';
 
-        // Show loading state
-        this.contentContainer.innerHTML = `
-            <div class="loading-state">
-                <div class="loading-spinner"></div>
-                <p>Loading ticket data...</p>
-            </div>
-        `;
+        // Show skeleton loading state
+        this.contentContainer.innerHTML = this.renderDetailSkeleton();
 
         try {
             const ticketData = await this.apiCall('support_center.api.customer_lookup.get_ticket_details', {
@@ -574,6 +569,9 @@ class SupportDashboard {
     }
 
     renderTicketDashboard(ticket) {
+        this.updateBreadcrumb(ticket.subject || ticket.ticket_id);
+        this.updateLastUpdated();
+
         const template = document.getElementById('ticket-dashboard-template');
         const content = template.content.cloneNode(true);
 
@@ -742,17 +740,8 @@ class SupportDashboard {
         // Update results header based on category
         this.updateResultsHeader();
 
-        // Show loading state
-        tbody.innerHTML = `
-            <tr class="loading-row">
-                <td colspan="5">
-                    <div class="table-loading">
-                        <div class="loading-spinner-small"></div>
-                        <span>Loading ${this.currentCategory === 'all' ? 'records' : this.getCategoryLabel(this.currentCategory).toLowerCase()}...</span>
-                    </div>
-                </td>
-            </tr>
-        `;
+        // Show skeleton loading state
+        this.renderTableSkeletonRows(tbody);
 
         this.isLoadingPage = true;
 
@@ -781,6 +770,11 @@ class SupportDashboard {
 
             // Update results count display
             this.updateResultsCount(response.total_count);
+
+            // Update header meta
+            this.updateBreadcrumb(null);
+            this.updateLastUpdated();
+            this.updateRecordCountBadge(response.total_count);
 
             if (response.results.length === 0) {
                 this.renderEmptyState(tbody, tableContainer);
@@ -900,6 +894,17 @@ class SupportDashboard {
             // Get source badge with appropriate styling
             const sourceHtml = customer.source ? `<span class="source-badge source-${customer.type}">${this.escapeHtml(customer.source)}</span>` : 'N/A';
 
+            // Build inline action buttons
+            let phoneBtn = '';
+            if (customer.phone) {
+                phoneBtn = `<a href="tel:${this.escapeHtml(customer.phone)}" class="row-action-btn action-phone" title="Call ${this.escapeHtml(customer.phone)}" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></a>`;
+            }
+            let emailBtn = '';
+            if (customer.email) {
+                emailBtn = `<a href="mailto:${this.escapeHtml(customer.email)}" class="row-action-btn action-email" title="Email ${this.escapeHtml(customer.email)}" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></a>`;
+            }
+            const rowActions = (phoneBtn || emailBtn) ? `<div class="row-actions">${phoneBtn}${emailBtn}</div>` : '';
+
             row.innerHTML = `
                 <td class="customer-name-cell">${this.escapeHtml(customer.name)}</td>
                 <td class="customer-email-cell">${this.escapeHtml(customer.email || 'N/A')}</td>
@@ -907,6 +912,7 @@ class SupportDashboard {
                 <td class="customer-source-cell">${sourceHtml}</td>
                 <td>
                     <div class="table-actions">
+                        ${rowActions}
                         <button data-customer-id="${customer.id}" data-customer-type="${customer.type}">View</button>
                     </div>
                 </td>
@@ -914,7 +920,7 @@ class SupportDashboard {
 
             // Click row to view record details
             row.addEventListener('click', (e) => {
-                if (e.target.tagName !== 'BUTTON') {
+                if (e.target.tagName !== 'BUTTON' && !e.target.closest('.row-action-btn')) {
                     this.loadRecord(customer.id, customer.type);
                 }
             });
@@ -1085,20 +1091,8 @@ class SupportDashboard {
         // Update results header
         this.updateResultsHeader();
 
-        // Show loading state
-        const searchingIn = this.currentCategory === 'all'
-            ? 'all records'
-            : this.getCategoryLabel(this.currentCategory).toLowerCase();
-        tbody.innerHTML = `
-            <tr class="loading-row">
-                <td colspan="5">
-                    <div class="table-loading">
-                        <div class="loading-spinner-small"></div>
-                        <span>Searching ${searchingIn}...</span>
-                    </div>
-                </td>
-            </tr>
-        `;
+        // Show skeleton loading state
+        this.renderTableSkeletonRows(tbody);
 
         this.isLoadingPage = true;
 
@@ -1127,6 +1121,10 @@ class SupportDashboard {
 
             // Update results count display
             this.updateResultsCount(response.total_count);
+
+            // Update header meta
+            this.updateLastUpdated();
+            this.updateRecordCountBadge(response.total_count);
 
             // Refresh category counts for current search query
             this.loadCategoryCounts();
@@ -1173,6 +1171,8 @@ class SupportDashboard {
 
     renderDashboard(customer, orders, history) {
         this.showingCustomerList = false;
+        this.updateBreadcrumb(customer.customer_name);
+        this.updateLastUpdated();
 
         // Clone template
         const template = document.getElementById('dashboard-template');
@@ -2622,6 +2622,8 @@ class SupportDashboard {
 
     renderBookingDashboard(booking) {
         this.showingCustomerList = false;
+        this.updateBreadcrumb(booking.customer_name || booking.name);
+        this.updateLastUpdated();
 
         // Clone template
         const template = document.getElementById('booking-dashboard-template');
@@ -2984,6 +2986,8 @@ class SupportDashboard {
 
     renderContactDashboard(contact) {
         this.showingCustomerList = false;
+        this.updateBreadcrumb(contact.name);
+        this.updateLastUpdated();
 
         // Clone template
         const template = document.getElementById('contact-dashboard-template');
@@ -3095,6 +3099,8 @@ class SupportDashboard {
 
     renderUserDashboard(user) {
         this.showingCustomerList = false;
+        this.updateBreadcrumb(user.name || user.email);
+        this.updateLastUpdated();
 
         // Clone template
         const template = document.getElementById('user-dashboard-template');
@@ -3243,9 +3249,343 @@ class SupportDashboard {
             minute: '2-digit'
         });
     }
+
+    // ============================================
+    // Skeleton Loaders
+    // ============================================
+
+    renderTableSkeletonRows(tbody, rowCount = 5) {
+        const widths = [
+            ['55%', '70%', '50%', '60%', '40%'],
+            ['45%', '65%', '55%', '50%', '35%'],
+            ['60%', '60%', '45%', '55%', '45%'],
+            ['50%', '75%', '40%', '65%', '40%'],
+            ['40%', '55%', '60%', '45%', '50%']
+        ];
+        let html = '';
+        for (let i = 0; i < rowCount; i++) {
+            const w = widths[i % widths.length];
+            html += `<tr class="skeleton-table-row">
+                <td><div class="skeleton skeleton-text" style="width:${w[0]}"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:${w[1]}"></div></td>
+                <td><div class="skeleton skeleton-text" style="width:${w[2]}"></div></td>
+                <td><div class="skeleton skeleton-text-sm" style="width:${w[3]}"></div></td>
+                <td><div class="skeleton skeleton-text-sm" style="width:${w[4]}"></div></td>
+            </tr>`;
+        }
+        tbody.innerHTML = html;
+    }
+
+    renderDetailSkeleton() {
+        return `
+            <button class="back-button" style="opacity:0.5;pointer-events:none;">← Back to Customer List</button>
+            <div class="skeleton-detail-grid">
+                <div class="skeleton-profile-card">
+                    <div class="skeleton-avatar"></div>
+                    <div class="skeleton skeleton-text-lg" style="width:60%;margin:12px auto 0"></div>
+                    <div class="skeleton skeleton-text-sm" style="width:40%;margin:8px auto 0"></div>
+                    <div class="skeleton skeleton-text" style="width:80%;margin:8px auto 0"></div>
+                    <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+                    <div class="skeleton skeleton-text" style="width:70%;margin:0 auto 8px"></div>
+                    <div class="skeleton skeleton-text" style="width:55%;margin:0 auto 8px"></div>
+                    <div style="display:flex;gap:8px;margin-top:16px;justify-content:center">
+                        <div class="skeleton" style="width:80px;height:32px;border-radius:6px"></div>
+                        <div class="skeleton" style="width:80px;height:32px;border-radius:6px"></div>
+                    </div>
+                </div>
+                <div class="skeleton-right-panel">
+                    <div class="skeleton-card">
+                        <div class="skeleton skeleton-text-lg" style="width:30%;margin-bottom:16px"></div>
+                        <div class="skeleton skeleton-text" style="width:100%;margin-bottom:8px"></div>
+                        <div class="skeleton skeleton-text" style="width:90%;margin-bottom:8px"></div>
+                        <div class="skeleton skeleton-text" style="width:95%;margin-bottom:8px"></div>
+                        <div class="skeleton skeleton-text" style="width:85%"></div>
+                    </div>
+                    <div class="skeleton-card">
+                        <div class="skeleton skeleton-text-lg" style="width:25%;margin-bottom:16px"></div>
+                        <div class="skeleton skeleton-text" style="width:100%;margin-bottom:8px"></div>
+                        <div class="skeleton skeleton-text" style="width:80%;margin-bottom:8px"></div>
+                        <div class="skeleton skeleton-text" style="width:70%"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // ============================================
+    // Enhanced Header (breadcrumb, timestamp, count)
+    // ============================================
+
+    updateBreadcrumb(recordName) {
+        const breadcrumb = document.getElementById('dashboard-breadcrumb');
+        if (!breadcrumb) return;
+
+        if (recordName) {
+            breadcrumb.innerHTML = `
+                <a href="/">Home</a>
+                <span class="breadcrumb-separator">/</span>
+                <a href="/support-center">Support Center</a>
+                <span class="breadcrumb-separator">/</span>
+                <span class="breadcrumb-current">${this.escapeHtml(recordName)}</span>
+            `;
+        } else {
+            breadcrumb.innerHTML = `
+                <a href="/">Home</a>
+                <span class="breadcrumb-separator">/</span>
+                <span class="breadcrumb-current">Support Center</span>
+            `;
+        }
+    }
+
+    updateLastUpdated() {
+        const el = document.getElementById('last-updated');
+        if (!el) return;
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        el.textContent = `Updated ${timeStr}`;
+    }
+
+    updateRecordCountBadge(count) {
+        const el = document.getElementById('record-count-badge');
+        if (!el) return;
+        if (count !== undefined && count !== null) {
+            el.textContent = `${count.toLocaleString()} records`;
+            el.style.display = '';
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
+    // ============================================
+    // Command Palette (⌘+K)
+    // ============================================
+
+    initializeCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (!palette) return;
+
+        const backdrop = palette.querySelector('.command-palette-backdrop');
+        const input = document.getElementById('command-palette-input');
+
+        // Close on backdrop click
+        backdrop.addEventListener('click', () => this.closeCommandPalette());
+
+        // Search with debounce
+        let searchTimeout;
+        input.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            const query = input.value.trim();
+            if (query.length === 0) {
+                this.renderDefaultPaletteItems();
+            } else {
+                searchTimeout = setTimeout(() => this.searchCommandPalette(query), 250);
+            }
+        });
+
+        // Keyboard navigation inside palette
+        input.addEventListener('keydown', (e) => this.handleCommandPaletteKeydown(e));
+    }
+
+    toggleCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (!palette) return;
+        if (palette.classList.contains('open')) {
+            this.closeCommandPalette();
+        } else {
+            this.openCommandPalette();
+        }
+    }
+
+    openCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (!palette) return;
+        palette.classList.add('open');
+        const input = document.getElementById('command-palette-input');
+        input.value = '';
+        this.paletteActiveIndex = 0;
+        this.renderDefaultPaletteItems();
+        setTimeout(() => input.focus(), 50);
+    }
+
+    closeCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (!palette) return;
+        palette.classList.remove('open');
+    }
+
+    renderDefaultPaletteItems() {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+
+        results.innerHTML = `
+            <div class="command-palette-group">
+                <div class="command-palette-group-title">Navigate</div>
+                <div class="command-palette-item active" data-action="navigate" data-url="/retention-dashboard">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                    <span>Retention Dashboard</span>
+                </div>
+            </div>
+            <div class="command-palette-group">
+                <div class="command-palette-group-title">Filter</div>
+                <div class="command-palette-item" data-action="filter" data-category="all">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                    <span>All Records</span>
+                </div>
+                <div class="command-palette-item" data-action="filter" data-category="contact">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                    <span>Customers</span>
+                </div>
+                <div class="command-palette-item" data-action="filter" data-category="customer">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line></svg>
+                    <span>Sales Orders</span>
+                </div>
+                <div class="command-palette-item" data-action="filter" data-category="booking">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    <span>Bookings</span>
+                </div>
+                <div class="command-palette-item" data-action="filter" data-category="ticket">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                    <span>Support Tickets</span>
+                </div>
+            </div>
+        `;
+
+        this.paletteActiveIndex = 0;
+        this.updatePaletteActiveItem();
+        this.bindCommandPaletteItemClicks();
+    }
+
+    async searchCommandPalette(query) {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+
+        results.innerHTML = `
+            <div class="command-palette-group">
+                <div class="command-palette-group-title">Searching...</div>
+                <div class="command-palette-item" style="opacity:0.5;pointer-events:none">
+                    <span>Looking for "${this.escapeHtml(query)}"...</span>
+                </div>
+            </div>
+        `;
+
+        try {
+            const data = await this.apiCall('support_center.api.customer_lookup.search_customers', {
+                query: query,
+                limit: 8
+            });
+
+            let html = '';
+
+            if (data && data.length > 0) {
+                html += `<div class="command-palette-group"><div class="command-palette-group-title">Records</div>`;
+                data.forEach(r => {
+                    const typeLabel = r.type === 'contact' ? 'Customer' : r.type === 'customer' ? 'Sales Order' : r.type === 'booking' ? 'Booking' : r.type === 'ticket' ? 'Ticket' : r.type;
+                    html += `
+                        <div class="command-palette-item" data-action="record" data-record-id="${this.escapeHtml(r.id)}" data-record-type="${this.escapeHtml(r.type)}">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                            <span>${this.escapeHtml(r.name)}</span>
+                            <span class="command-palette-item-meta">${this.escapeHtml(r.email || '')} · ${typeLabel}</span>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+            } else {
+                html += `
+                    <div class="command-palette-group">
+                        <div class="command-palette-group-title">No results</div>
+                        <div class="command-palette-item" style="opacity:0.5;pointer-events:none">
+                            <span>No records found for "${this.escapeHtml(query)}"</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            results.innerHTML = html;
+            this.paletteActiveIndex = 0;
+            this.updatePaletteActiveItem();
+            this.bindCommandPaletteItemClicks();
+
+        } catch (error) {
+            console.error('Command palette search failed:', error);
+            results.innerHTML = `
+                <div class="command-palette-group">
+                    <div class="command-palette-group-title">Error</div>
+                    <div class="command-palette-item" style="opacity:0.5;pointer-events:none">
+                        <span>Search failed. Please try again.</span>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    handleCommandPaletteKeydown(e) {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+        const items = results.querySelectorAll('.command-palette-item:not([style*="pointer-events:none"])');
+        if (!items.length) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            this.paletteActiveIndex = (this.paletteActiveIndex + 1) % items.length;
+            this.updatePaletteActiveItem();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            this.paletteActiveIndex = (this.paletteActiveIndex - 1 + items.length) % items.length;
+            this.updatePaletteActiveItem();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (items[this.paletteActiveIndex]) {
+                this.executePaletteAction(items[this.paletteActiveIndex]);
+            }
+        }
+    }
+
+    updatePaletteActiveItem() {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+        const items = results.querySelectorAll('.command-palette-item:not([style*="pointer-events:none"])');
+        items.forEach((item, i) => {
+            item.classList.toggle('active', i === this.paletteActiveIndex);
+        });
+        // Scroll active item into view
+        if (items[this.paletteActiveIndex]) {
+            items[this.paletteActiveIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    bindCommandPaletteItemClicks() {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+        results.querySelectorAll('.command-palette-item:not([style*="pointer-events:none"])').forEach((item, i) => {
+            item.addEventListener('click', () => {
+                this.paletteActiveIndex = i;
+                this.executePaletteAction(item);
+            });
+            item.addEventListener('mouseenter', () => {
+                this.paletteActiveIndex = i;
+                this.updatePaletteActiveItem();
+            });
+        });
+    }
+
+    executePaletteAction(item) {
+        const action = item.dataset.action;
+        this.closeCommandPalette();
+
+        if (action === 'navigate') {
+            window.location.href = item.dataset.url;
+        } else if (action === 'filter') {
+            const category = item.dataset.category;
+            this.setCategory(category);
+        } else if (action === 'record') {
+            const recordId = item.dataset.recordId;
+            const recordType = item.dataset.recordType;
+            this.loadRecord(recordId, recordType);
+        }
+    }
 }
 
 // Initialize dashboard when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    new SupportDashboard();
+    window.supportDashboard = new SupportDashboard();
 });

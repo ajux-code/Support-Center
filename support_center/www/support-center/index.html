@@ -11,8 +11,16 @@
         <!-- Header -->
         <div class="dashboard-header">
             <div class="header-left">
+                <nav class="dashboard-breadcrumb" id="dashboard-breadcrumb">
+                    <a href="/">Home</a>
+                    <span class="breadcrumb-separator">/</span>
+                    <span class="breadcrumb-current">Support Center</span>
+                </nav>
                 <h1>Customer Support</h1>
-                <p class="header-subtitle">Search and manage customer interactions</p>
+                <div class="header-meta">
+                    <span class="last-updated" id="last-updated"></span>
+                    <span class="record-count-badge" id="record-count-badge"></span>
+                </div>
             </div>
             <div class="header-right">
                 <div class="header-actions">
@@ -91,14 +99,11 @@
                             </tr>
                         </thead>
                         <tbody id="customer-table-body">
-                            <tr class="loading-row">
-                                <td colspan="5">
-                                    <div class="table-loading">
-                                        <div class="loading-spinner-small"></div>
-                                        <span>Loading customers...</span>
-                                    </div>
-                                </td>
-                            </tr>
+                            <tr class="skeleton-table-row"><td><div class="skeleton skeleton-text" style="width:55%"></div></td><td><div class="skeleton skeleton-text" style="width:70%"></div></td><td><div class="skeleton skeleton-text" style="width:50%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:60%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:40%"></div></td></tr>
+                            <tr class="skeleton-table-row"><td><div class="skeleton skeleton-text" style="width:45%"></div></td><td><div class="skeleton skeleton-text" style="width:65%"></div></td><td><div class="skeleton skeleton-text" style="width:55%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:50%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:35%"></div></td></tr>
+                            <tr class="skeleton-table-row"><td><div class="skeleton skeleton-text" style="width:60%"></div></td><td><div class="skeleton skeleton-text" style="width:60%"></div></td><td><div class="skeleton skeleton-text" style="width:45%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:55%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:45%"></div></td></tr>
+                            <tr class="skeleton-table-row"><td><div class="skeleton skeleton-text" style="width:50%"></div></td><td><div class="skeleton skeleton-text" style="width:75%"></div></td><td><div class="skeleton skeleton-text" style="width:40%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:65%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:40%"></div></td></tr>
+                            <tr class="skeleton-table-row"><td><div class="skeleton skeleton-text" style="width:40%"></div></td><td><div class="skeleton skeleton-text" style="width:55%"></div></td><td><div class="skeleton skeleton-text" style="width:60%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:45%"></div></td><td><div class="skeleton skeleton-text-sm" style="width:50%"></div></td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1059,6 +1064,27 @@
                 </div>
             </div>
         </template>
+
+        <!-- Command Palette -->
+        <div class="command-palette" id="command-palette">
+            <div class="command-palette-backdrop"></div>
+            <div class="command-palette-dialog">
+                <div class="command-palette-header">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <input type="text" class="command-palette-input" id="command-palette-input" placeholder="Search records, navigate, or filter..." autocomplete="off">
+                    <kbd class="command-palette-close-hint">esc</kbd>
+                </div>
+                <div class="command-palette-results" id="command-palette-results"></div>
+                <div class="command-palette-footer">
+                    <span><kbd>↑↓</kbd> navigate</span>
+                    <span><kbd>↵</kbd> select</span>
+                    <span><kbd>esc</kbd> close</span>
+                </div>
+            </div>
+        </div>
     </div>
 {% endblock %}
 

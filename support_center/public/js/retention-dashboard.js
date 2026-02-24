@@ -195,10 +195,10 @@ class RetentionDashboard {
                 this.closeModal();
             }
 
-            // Ctrl/Cmd + K - Focus search
+            // Ctrl/Cmd + K - Open command palette
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                 e.preventDefault();
-                this.searchInput?.focus();
+                this.toggleCommandPalette();
             }
 
             // Ctrl/Cmd + 1-4 - Switch tabs
@@ -351,6 +351,33 @@ class RetentionDashboard {
             const section = document.getElementById('full-calendar-section');
             section.style.display = 'none';
         });
+
+        // KPI card click handlers
+        document.querySelectorAll('.kpi-card[data-kpi-action]').forEach(card => {
+            card.addEventListener('click', () => {
+                this.handleKPICardClick(card.dataset.kpiAction);
+            });
+        });
+
+        // Command palette handlers
+        const palette = document.getElementById('command-palette');
+        if (palette) {
+            palette.querySelector('.command-palette-backdrop')?.addEventListener('click', () => this.closeCommandPalette());
+            const input = document.getElementById('command-palette-input');
+            if (input) {
+                let paletteTimeout = null;
+                input.addEventListener('input', (e) => {
+                    clearTimeout(paletteTimeout);
+                    const query = e.target.value.trim();
+                    if (!query) {
+                        this.renderDefaultPaletteItems();
+                        return;
+                    }
+                    paletteTimeout = setTimeout(() => this.searchCommandPalette(query), 250);
+                });
+                input.addEventListener('keydown', (e) => this.handleCommandPaletteKeydown(e));
+            }
+        }
     }
 
     switchTab(tabName) {
@@ -381,7 +408,7 @@ class RetentionDashboard {
     }
 
     async loadDashboard() {
-        this.showGlobalLoading();
+        this.showSkeletonLoaders();
         try {
             // Load all data in parallel for the new layout
             const [kpis, clients, products, compactCalendar] = await Promise.all([
@@ -398,7 +425,9 @@ class RetentionDashboard {
                 })
             ]);
 
+            this.kpiData = kpis;
             this.renderKPIs(kpis);
+            this.updateHeaderMeta(kpis);
             this.clients = clients;
             this.renderClients(clients);
             this.renderPagination();
@@ -709,6 +738,29 @@ class RetentionDashboard {
                                     ${client.renewal_status === 'overdue' ? '🔴 Overdue' : '⚠️ Due Soon'}
                                 </span>
                             </div>
+                            <div class="priority-item-actions">
+                                ${client.phone ? `
+                                    <a href="tel:${this.escapeHtml(client.phone)}" class="priority-action-btn action-phone" title="Call" onclick="event.stopPropagation();">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                                        </svg>
+                                    </a>
+                                ` : ''}
+                                ${client.email ? `
+                                    <a href="mailto:${this.escapeHtml(client.email)}" class="priority-action-btn action-email" title="Email" onclick="event.stopPropagation();">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                            <polyline points="22,6 12,13 2,6"></polyline>
+                                        </svg>
+                                    </a>
+                                ` : ''}
+                                <button class="priority-action-btn action-view" title="View details" onclick="event.stopPropagation(); window.retentionDashboard?.showClientDetail('${this.escapeHtml(client.customer_id)}');">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                        <circle cx="12" cy="12" r="3"></circle>
+                                    </svg>
+                                </button>
+                            </div>
                             <span class="priority-value">${this.formatCurrency(client.lifetime_value)}</span>
                         </div>
                         <div class="priority-item-details">
@@ -894,6 +946,11 @@ class RetentionDashboard {
     }
 
     renderKPIs(kpis) {
+        // Remove skeleton overlay from KPI cards
+        document.querySelectorAll('.kpi-card.kpi-skeleton').forEach(card => {
+            card.classList.remove('kpi-skeleton');
+        });
+
         const comparisons = kpis.comparisons || {};
 
         // Primary KPIs with trend indicators
@@ -2034,14 +2091,19 @@ class RetentionDashboard {
 
     showClientsLoading() {
         if (this.clientsTableBody) {
-            this.clientsTableBody.innerHTML = `
+            this.clientsTableBody.innerHTML = Array.from({length: 5}, () => `
                 <tr>
-                    <td colspan="7" class="loading-cell">
-                        <div class="loading-spinner"></div>
-                        <span>Loading clients...</span>
-                    </td>
+                    <td><div class="skeleton skeleton-text" style="width: 70%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 60%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 50%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 65%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 40%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 55%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 50%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 45%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 30%"></div></td>
                 </tr>
-            `;
+            `).join('');
         }
     }
 
@@ -2688,6 +2750,386 @@ class RetentionDashboard {
         return div.innerHTML;
     }
 
+    // ==========================================
+    // Skeleton Loaders
+    // ==========================================
+    showSkeletonLoaders() {
+        // KPI skeletons — use overlay class (don't destroy inner elements that renderKPIs needs)
+        document.querySelectorAll('.kpi-card').forEach(card => {
+            card.classList.add('kpi-skeleton');
+        });
+
+        // Compact calendar skeleton
+        const compactCalendar = document.getElementById('compact-calendar');
+        if (compactCalendar) {
+            compactCalendar.innerHTML = `<div class="compact-calendar-grid">${
+                Array.from({length: 7}, () => `
+                    <div class="skeleton-calendar-day">
+                        <div class="skeleton skeleton-text-sm" style="width: 24px; margin: 0 auto;"></div>
+                        <div class="skeleton skeleton-text-lg" style="width: 20px; margin: 0 auto;"></div>
+                        <div class="skeleton skeleton-text-sm" style="width: 32px; margin: 0 auto;"></div>
+                    </div>
+                `).join('')
+            }</div>`;
+        }
+
+        // Priority clients skeleton
+        const priorityList = document.getElementById('priority-clients-list');
+        if (priorityList) {
+            priorityList.innerHTML = Array.from({length: 3}, () => `
+                <div class="skeleton-priority-item">
+                    <div class="skeleton-priority-header">
+                        <div style="flex: 1;">
+                            <div class="skeleton skeleton-text" style="width: 65%; margin-bottom: 0.375rem;"></div>
+                            <div class="skeleton skeleton-text-sm" style="width: 40%;"></div>
+                        </div>
+                        <div class="skeleton skeleton-text" style="width: 60px;"></div>
+                    </div>
+                    <div class="skeleton-priority-details">
+                        <div class="skeleton skeleton-text-sm" style="width: 80px;"></div>
+                        <div class="skeleton skeleton-text-sm" style="width: 65px;"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Client table skeleton
+        if (this.clientsTableBody) {
+            this.clientsTableBody.innerHTML = Array.from({length: 5}, () => `
+                <tr>
+                    <td><div class="skeleton skeleton-text" style="width: 70%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 60%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 50%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 65%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 40%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 55%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 50%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 45%"></div></td>
+                    <td><div class="skeleton skeleton-text" style="width: 30%"></div></td>
+                </tr>
+            `).join('');
+        }
+    }
+
+    // ==========================================
+    // Enhanced Header
+    // ==========================================
+    updateHeaderMeta(kpis) {
+        // Update timestamp
+        const timeEl = document.getElementById('last-updated-time');
+        if (timeEl) {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            timeEl.textContent = `Updated ${displayHours}:${minutes} ${ampm}`;
+        }
+
+        // Update overdue badge
+        const badge = document.getElementById('overdue-badge');
+        const badgeText = document.getElementById('overdue-badge-text');
+        if (badge && badgeText && kpis) {
+            const atRisk = kpis.clients_at_risk || 0;
+            if (atRisk > 0) {
+                badge.style.display = '';
+                badgeText.textContent = `${atRisk} overdue`;
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    }
+
+    // ==========================================
+    // Command Palette
+    // ==========================================
+    toggleCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (!palette) return;
+        if (palette.classList.contains('open')) {
+            this.closeCommandPalette();
+        } else {
+            this.openCommandPalette();
+        }
+    }
+
+    openCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        const input = document.getElementById('command-palette-input');
+        if (!palette) return;
+        palette.classList.add('open');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+        this.paletteActiveIndex = 0;
+        this.renderDefaultPaletteItems();
+    }
+
+    closeCommandPalette() {
+        const palette = document.getElementById('command-palette');
+        if (palette) {
+            palette.classList.remove('open');
+        }
+    }
+
+    renderDefaultPaletteItems() {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+
+        results.innerHTML = `
+            <div class="command-palette-group-label">Navigate</div>
+            <div class="command-palette-item" data-action="navigate" data-target="calendar">
+                <div class="command-palette-item-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+                        <line x1="16" x2="16" y1="2" y2="6"></line>
+                        <line x1="8" x2="8" y1="2" y2="6"></line>
+                        <line x1="3" x2="21" y1="10" y2="10"></line>
+                    </svg>
+                </div>
+                <div class="command-palette-item-content">
+                    <div class="command-palette-item-title">Renewal Calendar</div>
+                    <div class="command-palette-item-subtitle">View upcoming renewals</div>
+                </div>
+            </div>
+            <div class="command-palette-item" data-action="navigate" data-target="clients">
+                <div class="command-palette-item-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                    </svg>
+                </div>
+                <div class="command-palette-item-content">
+                    <div class="command-palette-item-title">Client List</div>
+                    <div class="command-palette-item-subtitle">Browse all clients</div>
+                </div>
+            </div>
+            <div class="command-palette-item" data-action="navigate" data-target="analytics">
+                <div class="command-palette-item-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                    </svg>
+                </div>
+                <div class="command-palette-item-content">
+                    <div class="command-palette-item-title">Analytics</div>
+                    <div class="command-palette-item-subtitle">Trends & insights</div>
+                </div>
+            </div>
+            <div class="command-palette-group-label">Quick Filters</div>
+            <div class="command-palette-item" data-action="filter" data-filter="overdue">
+                <div class="command-palette-item-icon" style="background: var(--danger-soft); color: var(--danger);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                </div>
+                <div class="command-palette-item-content">
+                    <div class="command-palette-item-title">Overdue Clients</div>
+                    <div class="command-palette-item-subtitle">Filter to overdue renewals</div>
+                </div>
+            </div>
+            <div class="command-palette-item" data-action="filter" data-filter="due_soon">
+                <div class="command-palette-item-icon" style="background: var(--warning-soft); color: var(--warning);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </div>
+                <div class="command-palette-item-content">
+                    <div class="command-palette-item-title">Due Soon</div>
+                    <div class="command-palette-item-subtitle">Filter to upcoming renewals</div>
+                </div>
+            </div>
+        `;
+
+        this.paletteActiveIndex = 0;
+        this.updatePaletteActiveItem();
+        this.bindCommandPaletteItemClicks();
+    }
+
+    async searchCommandPalette(query) {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+
+        results.innerHTML = `
+            <div class="command-palette-loading">
+                <div class="loading-spinner"></div>
+                Searching...
+            </div>
+        `;
+
+        try {
+            const customers = await this.apiCall('support_center.api.retention_dashboard.search_customers', {
+                query: query,
+                limit: 8
+            });
+
+            if (!customers || customers.length === 0) {
+                results.innerHTML = `
+                    <div class="command-palette-empty">No results for "${this.escapeHtml(query)}"</div>
+                `;
+                return;
+            }
+
+            results.innerHTML = `
+                <div class="command-palette-group-label">Customers</div>
+                ${customers.map(c => `
+                    <div class="command-palette-item" data-action="customer" data-customer-id="${this.escapeHtml(c.customer_id || c.name)}">
+                        <div class="command-palette-item-icon">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="12" cy="7" r="4"></circle>
+                            </svg>
+                        </div>
+                        <div class="command-palette-item-content">
+                            <div class="command-palette-item-title">${this.escapeHtml(c.customer_name || c.name)}</div>
+                            <div class="command-palette-item-subtitle">${this.escapeHtml(c.email || c.phone || '')}</div>
+                        </div>
+                        <span class="command-palette-item-meta">${c.lifetime_value ? this.formatCurrency(c.lifetime_value) : ''}</span>
+                    </div>
+                `).join('')}
+            `;
+
+            this.paletteActiveIndex = 0;
+            this.updatePaletteActiveItem();
+            this.bindCommandPaletteItemClicks();
+        } catch (error) {
+            results.innerHTML = `
+                <div class="command-palette-empty">Search failed. Please try again.</div>
+            `;
+        }
+    }
+
+    handleCommandPaletteKeydown(e) {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+
+        const items = results.querySelectorAll('.command-palette-item');
+        if (!items.length) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            this.paletteActiveIndex = Math.min(this.paletteActiveIndex + 1, items.length - 1);
+            this.updatePaletteActiveItem();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            this.paletteActiveIndex = Math.max(this.paletteActiveIndex - 1, 0);
+            this.updatePaletteActiveItem();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const activeItem = items[this.paletteActiveIndex];
+            if (activeItem) {
+                this.executePaletteAction(activeItem);
+            }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            this.closeCommandPalette();
+        }
+    }
+
+    updatePaletteActiveItem() {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+        const items = results.querySelectorAll('.command-palette-item');
+        items.forEach((item, idx) => {
+            item.classList.toggle('active', idx === this.paletteActiveIndex);
+        });
+        // Scroll active into view
+        const active = items[this.paletteActiveIndex];
+        if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+
+    bindCommandPaletteItemClicks() {
+        const results = document.getElementById('command-palette-results');
+        if (!results) return;
+        results.querySelectorAll('.command-palette-item').forEach((item, idx) => {
+            item.addEventListener('click', () => {
+                this.paletteActiveIndex = idx;
+                this.executePaletteAction(item);
+            });
+            item.addEventListener('mouseenter', () => {
+                this.paletteActiveIndex = idx;
+                this.updatePaletteActiveItem();
+            });
+        });
+    }
+
+    executePaletteAction(item) {
+        const action = item.dataset.action;
+        this.closeCommandPalette();
+
+        if (action === 'navigate') {
+            this.navigateToSection(item.dataset.target);
+        } else if (action === 'filter') {
+            this.applyFilterFromPalette(item.dataset.filter);
+        } else if (action === 'customer') {
+            this.showClientDetail(item.dataset.customerId);
+        }
+    }
+
+    // ==========================================
+    // Shared Navigation Helpers
+    // ==========================================
+    navigateToSection(target) {
+        let section = null;
+        if (target === 'calendar') {
+            section = document.getElementById('full-calendar-section');
+            if (section && section.style.display === 'none') {
+                section.style.display = 'block';
+            }
+            this.loadCalendarData();
+        } else if (target === 'clients') {
+            section = document.querySelector('.clients-section');
+        } else if (target === 'analytics') {
+            section = document.getElementById('analytics-section');
+            if (section && section.classList.contains('collapsed')) {
+                section.classList.remove('collapsed');
+                if (!this.renewalRateChart) {
+                    this.loadTrendData();
+                }
+            }
+        }
+        if (section) {
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    applyFilterFromPalette(filter) {
+        this.currentFilter = filter;
+        document.querySelectorAll('.filter-tab').forEach(t => {
+            t.classList.toggle('active', (t.dataset.filter || '') === filter);
+        });
+        this.loadClients();
+        const section = document.querySelector('.clients-section');
+        if (section) {
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    // ==========================================
+    // KPI Card Click Handler
+    // ==========================================
+    handleKPICardClick(action) {
+        switch (action) {
+            case 'total-customers':
+                this.applyFilterFromPalette('');
+                break;
+            case 'at-risk':
+                this.applyFilterFromPalette('overdue');
+                break;
+            case 'renewal-revenue':
+                this.navigateToSection('calendar');
+                break;
+            case 'upsell-potential':
+                this.navigateToSection('clients');
+                break;
+        }
+    }
+
     getCsrfToken() {
         return frappe.boot?.csrf_token || frappe.csrf_token || '';
     }
@@ -2753,5 +3195,5 @@ class RetentionDashboard {
 
 // Initialize dashboard when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    new RetentionDashboard();
+    window.retentionDashboard = new RetentionDashboard();
 });
