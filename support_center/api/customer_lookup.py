@@ -961,6 +961,23 @@ def get_customer_details(customer_id):
         ]
         address_display = ", ".join(filter(None, address_parts))
 
+    # Subscription status
+    subscription = frappe.db.sql("""
+        SELECT s.name, s.status,
+            (SELECT GROUP_CONCAT(sp.plan SEPARATOR ', ')
+             FROM `tabSubscription Plan Detail` sp
+             WHERE sp.parent = s.name) as plan_names,
+            s.current_invoice_start, s.current_invoice_end
+        FROM `tabSubscription` s
+        WHERE s.party_type = 'Customer'
+        AND s.party = %(customer)s
+        AND s.status IN ('Active', 'Trialling', 'Past Due Date', 'Unpaid')
+        ORDER BY s.creation DESC
+        LIMIT 1
+    """, {"customer": customer_id}, as_dict=True)
+
+    sub_info = subscription[0] if subscription else None
+
     return {
         "customer_id": customer.name,
         "customer_name": customer.customer_name,
@@ -983,7 +1000,13 @@ def get_customer_details(customer_id):
 
         # Computed metrics from Meeting Manager
         "total_meetings": int(meeting_stats.get("total_meetings") or 0),
-        "last_meeting_date": meeting_stats.get("last_meeting_date")
+        "last_meeting_date": meeting_stats.get("last_meeting_date"),
+
+        # Subscription status
+        "subscription_status": sub_info.status if sub_info else None,
+        "subscription_name": sub_info.name if sub_info else None,
+        "subscription_plan": sub_info.plan_names if sub_info else None,
+        "subscription_end": sub_info.current_invoice_end if sub_info else None,
     }
 
 
@@ -1517,6 +1540,41 @@ def get_unified_timeline(customer_id, limit=20, offset=0):
     except Exception:
         pass
 
+    # 7. Get Subscriptions
+    subscriptions = frappe.db.sql("""
+        SELECT
+            s.name,
+            s.creation,
+            s.start_date,
+            s.status,
+            s.current_invoice_start,
+            s.current_invoice_end,
+            (SELECT GROUP_CONCAT(sp.plan SEPARATOR ', ')
+             FROM `tabSubscription Plan Detail` sp
+             WHERE sp.parent = s.name) as plan_names
+        FROM `tabSubscription` s
+        WHERE s.party_type = 'Customer'
+        AND s.party = %(customer)s
+        ORDER BY s.creation DESC
+        LIMIT %(fetch_limit)s
+    """, {"customer": customer_id, "fetch_limit": fetch_limit}, as_dict=True)
+
+    for sub in subscriptions:
+        plan_label = sub.plan_names or "Subscription"
+        details = f"Plan: {plan_label}"
+        if sub.current_invoice_end:
+            details += f" · Renews: {sub.current_invoice_end}"
+
+        timeline.append({
+            "type": "subscription",
+            "date": sub.creation,
+            "title": f"Subscription {sub.name}",
+            "details": details,
+            "status": sub.status,
+            "id": sub.name,
+            "icon": "credit-card"
+        })
+
     # Sort all events by date descending
     timeline.sort(key=lambda x: x.get("date") or "", reverse=True)
 
@@ -1667,6 +1725,39 @@ def create_hd_ticket(customer_email, customer_name, subject, description='',
         "status": ticket.status,
         "subject": ticket.subject
     }
+
+
+@frappe.whitelist()
+def get_subscription_plans():
+    """Fetch available Subscription Plans for the assign-plan modal."""
+    require_login()
+    plans = frappe.get_all(
+        "Subscription Plan",
+        fields=["name", "plan_name", "cost", "billing_interval", "billing_interval_count"],
+        order_by="plan_name asc"
+    )
+    return plans
+
+
+@frappe.whitelist()
+def create_customer_subscription(customer_id, plan, start_date=None):
+    """Create an ERPNext Subscription for a customer from the Support Centre."""
+    require_login()
+
+    if not customer_id or not plan:
+        frappe.throw(_("Customer and plan are required"))
+
+    sub = frappe.get_doc({
+        "doctype": "Subscription",
+        "party_type": "Customer",
+        "party": customer_id,
+        "start_date": start_date or frappe.utils.today(),
+        "plans": [{"plan": plan, "qty": 1}]
+    })
+    sub.insert()
+    sub.submit()
+
+    return {"name": sub.name, "status": sub.status}
 
 
 @frappe.whitelist()

@@ -124,7 +124,10 @@
                                     <span data-field="customer_initials">JD</span>
                                 </div>
                                 <div class="profile-info">
-                                    <div class="profile-name" data-field="customer_name"></div>
+                                    <div class="profile-name-row">
+                                        <span class="profile-name" data-field="customer_name"></span>
+                                        <span class="subscription-badge" data-field="subscription_badge"></span>
+                                    </div>
                                     <div class="profile-id" data-field="customer_id"></div>
                                 </div>
                             </div>
@@ -263,6 +266,16 @@
                                     </svg>
                                 </span>
                                 <span class="action-label">Create Ticket</span>
+                            </button>
+                            <button class="action-btn" data-action="assign-plan">
+                                <span class="action-icon">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
+                                        <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+                                        <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
+                                    </svg>
+                                </span>
+                                <span class="action-label">Assign Plan</span>
                             </button>
                         </div>
                     </div>
@@ -493,6 +506,45 @@
                                 <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                             </svg>
                             Creating...
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Assign Plan Modal -->
+        <div id="plan-modal" class="modal" style="display: none;">
+            <div class="modal-overlay" data-action="close-plan-modal"></div>
+            <div class="modal-content ticket-modal-content">
+                <div class="modal-header">
+                    <h2>Assign Support Plan</h2>
+                    <button class="modal-close" data-action="close-plan-modal">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 6 6 18"></path>
+                            <path d="m6 6 12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="ticket-customer-info" id="plan-customer-info"></div>
+                    <div class="form-group">
+                        <label for="plan-select">Subscription Plan <span class="required">*</span></label>
+                        <select id="plan-select"><option value="">Loading...</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="plan-start-date">Start Date</label>
+                        <input type="date" id="plan-start-date">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" data-action="close-plan-modal">Cancel</button>
+                    <button class="btn-primary" data-action="submit-plan">
+                        <span class="btn-text">Assign Plan</span>
+                        <span class="btn-loading" style="display: none;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin">
+                                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                            </svg>
+                            Assigning...
                         </span>
                     </button>
                 </div>

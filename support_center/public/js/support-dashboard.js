@@ -1246,6 +1246,22 @@ class SupportDashboard {
             outstandingEl.classList.add('has-outstanding');
         }
 
+        // Subscription badge
+        const badgeEl = clone.querySelector('[data-field="subscription_badge"]');
+        if (badgeEl) {
+            const subStatus = customer.subscription_status;
+            if (subStatus === 'Active' || subStatus === 'Trialling') {
+                badgeEl.textContent = 'Paid';
+                badgeEl.classList.add('badge-paid');
+            } else if (subStatus === 'Past Due Date' || subStatus === 'Unpaid') {
+                badgeEl.textContent = 'Past Due';
+                badgeEl.classList.add('badge-pastdue');
+            } else {
+                badgeEl.textContent = 'Unpaid';
+                badgeEl.classList.add('badge-unpaid');
+            }
+        }
+
         // Populate orders table
         const ordersContainer = clone.querySelector('[data-container="orders"]');
         if (orders.length === 0) {
@@ -1673,6 +1689,11 @@ class SupportDashboard {
             </svg>`,
             'chat': `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"></path>
+            </svg>`,
+            'subscription': `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
+                <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+                <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
             </svg>`
         };
         const defaultIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1776,6 +1797,10 @@ class SupportDashboard {
         // Create Ticket
         element.querySelector('[data-action="create-ticket"]')?.addEventListener('click', () => {
             this.showTicketModal();
+        });
+
+        element.querySelector('[data-action="assign-plan"]')?.addEventListener('click', () => {
+            this.showPlanModal();
         });
 
         // View Full Profile
@@ -2031,6 +2056,124 @@ class SupportDashboard {
                 sel.innerHTML = '<option value="">-- Failed to load --</option>';
             });
         }
+    }
+
+    async showPlanModal() {
+        const modal = document.getElementById('plan-modal');
+        const modalBody = modal.querySelector('.modal-body');
+        const modalFooter = modal.querySelector('.modal-footer');
+
+        // Store original HTML for reset
+        if (!this._planModalBodyHTML) {
+            this._planModalBodyHTML = modalBody.innerHTML;
+            this._planModalFooterHTML = modalFooter.innerHTML;
+        }
+
+        // Restore form if replaced by success view
+        modalBody.innerHTML = this._planModalBodyHTML;
+        modalFooter.innerHTML = this._planModalFooterHTML;
+
+        const planSelect = document.getElementById('plan-select');
+        const startDateEl = document.getElementById('plan-start-date');
+        const submitEl = modal.querySelector('[data-action="submit-plan"]');
+        const closeEls = modal.querySelectorAll('[data-action="close-plan-modal"]');
+        const custInfoEl = document.getElementById('plan-customer-info');
+
+        // Reset
+        submitEl.disabled = false;
+        submitEl.querySelector('.btn-text').style.display = 'inline';
+        submitEl.querySelector('.btn-loading').style.display = 'none';
+        startDateEl.value = new Date().toISOString().split('T')[0];
+
+        // Auto-populate customer info
+        const customer = this.currentCustomer;
+        custInfoEl.innerHTML = `
+            <div class="customer-avatar">${this.getInitials(customer.customer_name)}</div>
+            <div class="customer-meta">
+                <strong>${this.escapeHtml(customer.customer_name)}</strong>
+                <span>${this.escapeHtml(customer.email || customer.phone || customer.customer_id)}</span>
+            </div>
+        `;
+
+        // Show modal
+        modal.style.display = 'flex';
+
+        // Load plans
+        planSelect.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const plans = await this.apiCall('support_center.api.customer_lookup.get_subscription_plans');
+            planSelect.innerHTML = '<option value="">-- Select Plan --</option>';
+            (plans || []).forEach(p => {
+                const label = `${this.escapeHtml(p.plan_name)} — ${this.formatCurrency(p.cost)}/${p.billing_interval}`;
+                planSelect.innerHTML += `<option value="${this.escapeHtml(p.name)}">${label}</option>`;
+            });
+        } catch (error) {
+            console.error('Failed to load plans:', error);
+            planSelect.innerHTML = '<option value="">-- Failed to load --</option>';
+        }
+
+        // Close handlers
+        closeEls.forEach(btn => {
+            btn.onclick = () => { modal.style.display = 'none'; };
+        });
+
+        // Submit handler
+        submitEl.onclick = async () => {
+            const plan = planSelect.value;
+            if (!plan) {
+                alert('Please select a subscription plan');
+                planSelect.focus();
+                return;
+            }
+
+            const btnText = submitEl.querySelector('.btn-text');
+            const btnLoading = submitEl.querySelector('.btn-loading');
+
+            try {
+                btnText.style.display = 'none';
+                btnLoading.style.display = 'inline';
+                submitEl.disabled = true;
+
+                const result = await this.apiCall('support_center.api.customer_lookup.create_customer_subscription', {
+                    customer_id: customer.customer_id,
+                    plan: plan,
+                    start_date: startDateEl.value || ''
+                });
+
+                // Show success
+                const body = modal.querySelector('.modal-body');
+                const footer = modal.querySelector('.modal-footer');
+                body.innerHTML = `
+                    <div class="ticket-success">
+                        <div class="success-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 6 9 17l-5-5"></path>
+                            </svg>
+                        </div>
+                        <h3>Plan Assigned</h3>
+                        <p>Subscription <strong>${this.escapeHtml(result.name)}</strong> created with status: ${this.escapeHtml(result.status)}</p>
+                    </div>
+                `;
+                footer.innerHTML = `<button class="btn-primary" data-action="close-plan-modal">Done</button>`;
+                footer.querySelector('[data-action="close-plan-modal"]').onclick = () => {
+                    modal.style.display = 'none';
+                };
+
+                // Update badge in the live profile card
+                const liveBadge = document.querySelector('[data-field="subscription_badge"]');
+                if (liveBadge) {
+                    liveBadge.textContent = 'Paid';
+                    liveBadge.className = 'subscription-badge badge-paid';
+                }
+
+            } catch (error) {
+                console.error('Failed to create subscription:', error);
+                alert('Failed to assign plan: ' + (error.message || 'Please try again.'));
+                btnText.style.display = 'inline';
+                btnLoading.style.display = 'none';
+                submitEl.disabled = false;
+            }
+        };
     }
 
     // Utility methods
@@ -2311,7 +2454,8 @@ class SupportDashboard {
             'delivery': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>',
             'note': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>',
             'communication': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
-            'chat': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>'
+            'chat': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>',
+            'subscription': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path></svg>'
         };
         return icons[type] || icons['communication'];
     }
@@ -2326,7 +2470,8 @@ class SupportDashboard {
             'delivery': 'Delivery',
             'note': 'Note',
             'communication': 'Message',
-            'chat': 'Chat'
+            'chat': 'Chat',
+            'subscription': 'Subscription'
         };
         return labels[type] || this.capitalize(type);
     }
