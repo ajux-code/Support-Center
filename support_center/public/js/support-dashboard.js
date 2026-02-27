@@ -94,7 +94,7 @@ class SupportDashboard {
             url.searchParams.delete('q');
         }
 
-        window.history.replaceState({}, '', url);
+        window.history.pushState({}, '', url);
     }
 
     /**
@@ -355,12 +355,22 @@ class SupportDashboard {
     }
 
     loadCustomer(customerId) {
-        // Navigate to dedicated customer detail page using query parameter
-        window.location.href = `/support-center?customer=${encodeURIComponent(customerId)}`;
+        // Navigate to dedicated customer detail page, preserving search state
+        const url = new URL('/support-center', window.location.origin);
+        url.searchParams.set('customer', customerId);
+
+        if (this.customerListQuery) {
+            url.searchParams.set('q', this.customerListQuery);
+        }
+        if (this.currentCategory && this.currentCategory !== 'all') {
+            url.searchParams.set('category', this.currentCategory);
+        }
+
+        window.location.href = url.toString();
     }
 
     loadRecord(recordId, recordType) {
-        // Navigate to dedicated record detail page using appropriate query parameter
+        // Navigate to dedicated record detail page, preserving search/category state
         const paramMap = {
             'customer': 'customer',
             'booking': 'booking',
@@ -369,7 +379,18 @@ class SupportDashboard {
             'ticket': 'ticket'
         };
         const param = paramMap[recordType] || 'customer';
-        window.location.href = `/support-center?${param}=${encodeURIComponent(recordId)}`;
+        const url = new URL('/support-center', window.location.origin);
+        url.searchParams.set(param, recordId);
+
+        // Preserve search and category so back-navigation restores state
+        if (this.customerListQuery) {
+            url.searchParams.set('q', this.customerListQuery);
+        }
+        if (this.currentCategory && this.currentCategory !== 'all') {
+            url.searchParams.set('category', this.currentCategory);
+        }
+
+        window.location.href = url.toString();
     }
 
     async loadRecordDetail(recordId, recordType) {
@@ -637,8 +658,17 @@ class SupportDashboard {
         // Setup event listeners
         this.setupTicketEventListeners(content, ticket);
 
-        // Clear and show
+        // Clear and show with back button
         this.contentContainer.innerHTML = '';
+
+        const backBtn = document.createElement('button');
+        backBtn.className = 'back-button';
+        backBtn.innerHTML = '← Back to List';
+        backBtn.onclick = () => {
+            window.location.href = this.getBackURL();
+        };
+        this.contentContainer.appendChild(backBtn);
+
         this.contentContainer.appendChild(content);
     }
 
@@ -730,12 +760,14 @@ class SupportDashboard {
     }
 
     async loadCustomerList() {
+        // If there's an active search query, delegate to filterCustomerList instead
+        if (this.customerListQuery) {
+            return this.filterCustomerList(this.customerListQuery);
+        }
+
         this.showingCustomerList = true;
         const tbody = document.getElementById('customer-table-body');
         const tableContainer = document.querySelector('.customer-table-container');
-
-        // Clear search query when loading full list
-        this.customerListQuery = '';
 
         // Update results header based on category
         this.updateResultsHeader();
@@ -903,7 +935,7 @@ class SupportDashboard {
             if (customer.email) {
                 emailBtn = `<a href="mailto:${this.escapeHtml(customer.email)}" class="row-action-btn action-email" title="Email ${this.escapeHtml(customer.email)}" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg></a>`;
             }
-            const rowActions = (phoneBtn || emailBtn) ? `<div class="row-actions">${phoneBtn}${emailBtn}</div>` : '';
+            const rowActions = `<div class="row-actions">${phoneBtn}${emailBtn}</div>`;
 
             row.innerHTML = `
                 <td class="customer-name-cell">${this.escapeHtml(customer.name)}</td>
@@ -1076,6 +1108,7 @@ class SupportDashboard {
     }
 
     async filterCustomerList(query) {
+        this.showingCustomerList = true;
         const tbody = document.getElementById('customer-table-body');
         const tableContainer = document.querySelector('.customer-table-container');
 
@@ -1152,6 +1185,20 @@ class SupportDashboard {
         } finally {
             this.isLoadingPage = false;
         }
+    }
+
+    /**
+     * Build the back-to-list URL preserving search query and category
+     */
+    getBackURL() {
+        const url = new URL('/support-center', window.location.origin);
+        if (this.customerListQuery) {
+            url.searchParams.set('q', this.customerListQuery);
+        }
+        if (this.currentCategory && this.currentCategory !== 'all') {
+            url.searchParams.set('category', this.currentCategory);
+        }
+        return url.toString();
     }
 
     showBackButton() {
@@ -1256,8 +1303,7 @@ class SupportDashboard {
         backBtn.className = 'back-button';
         backBtn.innerHTML = '← Back to Customer List';
         backBtn.onclick = () => {
-            // Navigate to base URL without query params to show customer list
-            window.location.href = '/support-center';
+            window.location.href = this.getBackURL();
         };
         this.contentContainer.appendChild(backBtn);
 
@@ -1655,17 +1701,21 @@ class SupportDashboard {
         this.setFieldValue(clone, 'title', title);
 
         // Build meta info
-        let meta = this.formatDate(item.date);
+        let meta = this.escapeHtml(this.formatDate(item.date));
+        if (item.booked_by) {
+            meta += ` • Booked by <span class="booked-by-agent">${this.escapeHtml(item.booked_by)}</span>`;
+        }
         if (item.assigned_to) {
-            meta += ` • ${item.assigned_to}`;
+            meta += ` • ${this.escapeHtml(item.assigned_to)}`;
         }
         if (item.created_by) {
-            meta += ` • ${item.created_by}`;
+            meta += ` • ${this.escapeHtml(item.created_by)}`;
         }
         if (item.status) {
-            meta += ` • ${item.status}`;
+            meta += ` • ${this.escapeHtml(item.status)}`;
         }
-        this.setFieldValue(clone, 'meta', meta);
+        const metaEl = clone.querySelector('[data-field="meta"]');
+        if (metaEl) metaEl.innerHTML = meta;
 
         // Set notes if available
         const notes = item.notes || item.content;
@@ -1721,6 +1771,11 @@ class SupportDashboard {
         // Create Order
         element.querySelector('[data-action="create-order"]')?.addEventListener('click', () => {
             window.open(`/app/sales-order/new?customer=${this.currentCustomer.customer_id}`, '_blank');
+        });
+
+        // Create Ticket
+        element.querySelector('[data-action="create-ticket"]')?.addEventListener('click', () => {
+            this.showTicketModal();
         });
 
         // View Full Profile
@@ -1795,6 +1850,187 @@ class SupportDashboard {
                 saveBtn.disabled = false;
             }
         };
+    }
+
+    async showTicketModal() {
+        const modal = document.getElementById('ticket-modal');
+        const modalBody = modal.querySelector('.modal-body');
+        const modalFooter = modal.querySelector('.modal-footer');
+
+        // Store original modal body/footer HTML for reset
+        if (!this._ticketModalBodyHTML) {
+            this._ticketModalBodyHTML = modalBody.innerHTML;
+            this._ticketModalFooterHTML = modalFooter.innerHTML;
+        }
+
+        // Restore form if it was replaced by success view
+        modalBody.innerHTML = this._ticketModalBodyHTML;
+        modalFooter.innerHTML = this._ticketModalFooterHTML;
+
+        // Re-query elements after restoring
+        const subjectEl = document.getElementById('ticket-subject');
+        const descEl = document.getElementById('ticket-description');
+        const typeEl = document.getElementById('ticket-type');
+        const priorityEl = document.getElementById('ticket-priority');
+        const teamEl = document.getElementById('ticket-team');
+        const folderEl = document.getElementById('ticket-folder');
+        const assigneeEl = document.getElementById('ticket-assignee');
+        const submitEl = modal.querySelector('[data-action="submit-ticket"]');
+        const closeEls = modal.querySelectorAll('[data-action="close-ticket-modal"]');
+        const custInfoEl = document.getElementById('ticket-customer-info');
+
+        // Reset form
+        subjectEl.value = '';
+        folderEl.disabled = true;
+        folderEl.innerHTML = '<option value="">Select team first</option>';
+        assigneeEl.disabled = true;
+        assigneeEl.innerHTML = '<option value="">Select team first</option>';
+        submitEl.disabled = false;
+        submitEl.querySelector('.btn-text').style.display = 'inline';
+        submitEl.querySelector('.btn-loading').style.display = 'none';
+
+        // Auto-populate customer info banner
+        const customer = this.currentCustomer;
+        custInfoEl.innerHTML = `
+            <div class="customer-avatar">${this.getInitials(customer.customer_name)}</div>
+            <div class="customer-meta">
+                <strong>${this.escapeHtml(customer.customer_name)}</strong>
+                <span>${this.escapeHtml(customer.email || customer.phone || customer.customer_id)}</span>
+            </div>
+        `;
+
+        // Pre-fill description with customer context
+        descEl.value = `Customer: ${customer.customer_name}\nEmail: ${customer.email || 'N/A'}\nPhone: ${customer.phone || 'N/A'}\n\n`;
+
+        // Show modal
+        modal.style.display = 'flex';
+        subjectEl.focus();
+
+        // Load dropdown options
+        this.loadTicketDropdowns(typeEl, priorityEl, teamEl);
+
+        // Team change handler — load folders and agents for the selected team
+        // Use onchange (not addEventListener) to auto-replace on repeated modal opens
+        teamEl.onchange = async () => {
+            const fSel = document.getElementById('ticket-folder');
+            const aSel = document.getElementById('ticket-assignee');
+            const team = teamEl.value;
+            if (!team) {
+                fSel.disabled = true;
+                fSel.innerHTML = '<option value="">Select team first</option>';
+                aSel.disabled = true;
+                aSel.innerHTML = '<option value="">Select team first</option>';
+                return;
+            }
+            fSel.innerHTML = '<option value="">Loading...</option>';
+            aSel.innerHTML = '<option value="">Loading...</option>';
+            try {
+                const opts = await this.apiCall('support_center.api.customer_lookup.get_team_options', { team });
+                fSel.disabled = false;
+                fSel.innerHTML = '<option value="">-- Select Folder --</option>';
+                (opts.folders || []).forEach(f => {
+                    fSel.innerHTML += `<option value="${this.escapeHtml(f.id)}">${this.escapeHtml(f.name)}</option>`;
+                });
+                aSel.disabled = false;
+                aSel.innerHTML = '<option value="">-- Select Assignee --</option>';
+                (opts.agents || []).forEach(a => {
+                    aSel.innerHTML += `<option value="${this.escapeHtml(a.id)}">${this.escapeHtml(a.name)}</option>`;
+                });
+            } catch (error) {
+                console.error('Failed to load team options:', error);
+                fSel.innerHTML = '<option value="">-- Failed to load --</option>';
+                aSel.innerHTML = '<option value="">-- Failed to load --</option>';
+            }
+        };
+
+        // Close handlers
+        closeEls.forEach(btn => {
+            btn.onclick = () => { modal.style.display = 'none'; };
+        });
+
+        // Submit handler
+        submitEl.onclick = async () => {
+            const subject = subjectEl.value.trim();
+            if (!subject) {
+                alert('Please enter a subject for the ticket');
+                subjectEl.focus();
+                return;
+            }
+
+            const btnText = submitEl.querySelector('.btn-text');
+            const btnLoading = submitEl.querySelector('.btn-loading');
+
+            try {
+                btnText.style.display = 'none';
+                btnLoading.style.display = 'inline';
+                submitEl.disabled = true;
+
+                const result = await this.apiCall('support_center.api.customer_lookup.create_hd_ticket', {
+                    customer_email: customer.email || '',
+                    customer_name: customer.customer_name,
+                    subject: subject,
+                    description: descEl.value.trim(),
+                    ticket_type: typeEl.value || '',
+                    priority: priorityEl.value || '',
+                    agent_group: teamEl.value || '',
+                    team_folder: document.getElementById('ticket-folder').value || '',
+                    assignee: document.getElementById('ticket-assignee').value || ''
+                });
+
+                // Show success state
+                const body = modal.querySelector('.modal-body');
+                const footer = modal.querySelector('.modal-footer');
+                body.innerHTML = `
+                    <div class="ticket-success">
+                        <div class="success-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 6 9 17l-5-5"></path>
+                            </svg>
+                        </div>
+                        <h3>Ticket Created</h3>
+                        <p>Ticket <strong>${this.escapeHtml(result.ticket_id)}</strong> has been created.</p>
+                        <a href="/helpdesk/tickets/${this.escapeHtml(result.ticket_id)}" target="_blank">Open in Helpdesk &rarr;</a>
+                    </div>
+                `;
+                footer.innerHTML = `<button class="btn-primary" data-action="close-ticket-modal">Done</button>`;
+                footer.querySelector('[data-action="close-ticket-modal"]').onclick = () => {
+                    modal.style.display = 'none';
+                };
+
+            } catch (error) {
+                console.error('Failed to create ticket:', error);
+                alert('Failed to create ticket: ' + (error.message || 'Please try again.'));
+                btnText.style.display = 'inline';
+                btnLoading.style.display = 'none';
+                submitEl.disabled = false;
+            }
+        };
+    }
+
+    async loadTicketDropdowns(typeSelect, prioritySelect, teamSelect) {
+        try {
+            const options = await this.apiCall('support_center.api.customer_lookup.get_ticket_options');
+
+            typeSelect.innerHTML = '<option value="">-- Select Type --</option>';
+            (options.ticket_types || []).forEach(t => {
+                typeSelect.innerHTML += `<option value="${this.escapeHtml(t)}">${this.escapeHtml(t)}</option>`;
+            });
+
+            prioritySelect.innerHTML = '<option value="">-- Select Priority --</option>';
+            (options.priorities || []).forEach(p => {
+                prioritySelect.innerHTML += `<option value="${this.escapeHtml(p)}">${this.escapeHtml(p)}</option>`;
+            });
+
+            teamSelect.innerHTML = '<option value="">-- Select Team --</option>';
+            (options.teams || []).forEach(t => {
+                teamSelect.innerHTML += `<option value="${this.escapeHtml(t)}">${this.escapeHtml(t)}</option>`;
+            });
+        } catch (error) {
+            console.error('Failed to load ticket options:', error);
+            [typeSelect, prioritySelect, teamSelect].forEach(sel => {
+                sel.innerHTML = '<option value="">-- Failed to load --</option>';
+            });
+        }
     }
 
     // Utility methods
@@ -2028,6 +2264,16 @@ class SupportDashboard {
             this.setFieldValue(clone, 'details', event.details);
         } else {
             clone.querySelector('[data-field="details"]').style.display = 'none';
+        }
+
+        // Show booked-by agent for meetings
+        if (event.booked_by) {
+            const detailsEl = clone.querySelector('[data-field="details"]');
+            if (detailsEl) {
+                const detailsPart = event.details ? `${this.escapeHtml(event.details)}<br>` : '';
+                detailsEl.innerHTML = `${detailsPart}Booked by <span class="booked-by-agent">${this.escapeHtml(event.booked_by)}</span>`;
+                detailsEl.style.display = 'block';
+            }
         }
 
         // Set amount for orders/invoices
@@ -2726,7 +2972,7 @@ class SupportDashboard {
         backBtn.className = 'back-button';
         backBtn.innerHTML = '← Back to List';
         backBtn.onclick = () => {
-            window.location.href = '/support-center';
+            window.location.href = this.getBackURL();
         };
         this.contentContainer.appendChild(backBtn);
 
@@ -3060,7 +3306,7 @@ class SupportDashboard {
         backBtn.className = 'back-button';
         backBtn.innerHTML = '← Back to List';
         backBtn.onclick = () => {
-            window.location.href = '/support-center';
+            window.location.href = this.getBackURL();
         };
         this.contentContainer.appendChild(backBtn);
 
@@ -3194,7 +3440,7 @@ class SupportDashboard {
         backBtn.className = 'back-button';
         backBtn.innerHTML = '← Back to List';
         backBtn.onclick = () => {
-            window.location.href = '/support-center';
+            window.location.href = this.getBackURL();
         };
         this.contentContainer.appendChild(backBtn);
 

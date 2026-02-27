@@ -1379,7 +1379,8 @@ def get_unified_timeline(customer_id, limit=20, offset=0):
                 start_datetime,
                 booking_status,
                 customer_notes,
-                meeting_type
+                meeting_type,
+                created_by
             FROM `tabMM Meeting Booking`
             WHERE customer = %(customer_id)s
             AND booking_status NOT IN ('Cancelled')
@@ -1408,7 +1409,8 @@ def get_unified_timeline(customer_id, limit=20, offset=0):
                     start_datetime,
                     booking_status,
                     customer_notes,
-                    meeting_type
+                    meeting_type,
+                    created_by
                 FROM `tabMM Meeting Booking`
                 WHERE customer IS NULL
                 AND ({booking_where})
@@ -1419,6 +1421,10 @@ def get_unified_timeline(customer_id, limit=20, offset=0):
 
         for booking in bookings:
             meeting_type_name = booking.meeting_type or "Meeting"
+            # Resolve created_by to full name
+            booked_by = None
+            if booking.created_by:
+                booked_by = frappe.db.get_value("User", booking.created_by, "full_name") or booking.created_by
             timeline.append({
                 "type": "meeting",
                 "date": booking.start_datetime,
@@ -1426,7 +1432,8 @@ def get_unified_timeline(customer_id, limit=20, offset=0):
                 "details": booking.customer_notes[:80] + "..." if booking.customer_notes and len(booking.customer_notes) > 80 else booking.customer_notes,
                 "status": booking.booking_status,
                 "id": booking.name,
-                "icon": "calendar"
+                "icon": "calendar",
+                "booked_by": booked_by
             })
 
     # 4. Get Communications (emails, calls, chats)
@@ -1550,6 +1557,115 @@ def create_quick_note(customer_id, note_content):
     return {
         "success": True,
         "note_id": comm.name
+    }
+
+
+@frappe.whitelist()
+def get_ticket_options():
+    """
+    Fetch HD Ticket Type, HD Ticket Priority, and HD Team lists
+    for the Create Ticket modal dropdowns.
+    """
+    require_login()
+
+    ticket_types = frappe.get_all("HD Ticket Type", pluck="name", order_by="name asc")
+    priorities = frappe.get_all("HD Ticket Priority", pluck="name", order_by="integer_value asc")
+    teams = frappe.get_all("HD Team", pluck="name", order_by="name asc")
+
+    return {
+        "ticket_types": ticket_types,
+        "priorities": priorities,
+        "teams": teams
+    }
+
+
+@frappe.whitelist()
+def get_team_options(team):
+    """
+    Fetch folders and agents for a specific HD Team.
+    Called when the team dropdown changes.
+    """
+    require_login()
+
+    if not team:
+        return {"folders": [], "agents": []}
+
+    folder_list = frappe.get_all(
+        "HD Team Folder",
+        filters={"team": team},
+        fields=["name", "folder_name"],
+        order_by="folder_name asc"
+    )
+    folders = [{"id": f.name, "name": f.folder_name} for f in folder_list]
+
+    # Get team members (HD Agent linked to this team)
+    agents = []
+    team_members = frappe.get_all(
+        "HD Team Member",
+        filters={"parent": team, "parenttype": "HD Team"},
+        pluck="user"
+    )
+    if team_members:
+        agent_list = frappe.get_all(
+            "HD Agent",
+            filters={"name": ("in", team_members), "is_active": 1},
+            fields=["name", "agent_name"],
+            order_by="agent_name asc"
+        )
+        agents = [{"id": a.name, "name": a.agent_name or a.name} for a in agent_list]
+
+    return {"folders": folders, "agents": agents}
+
+
+@frappe.whitelist()
+def create_hd_ticket(customer_email, customer_name, subject, description='',
+                     ticket_type='', priority='', agent_group='',
+                     team_folder='', assignee=''):
+    """
+    Create an HD Ticket from the Support Center.
+
+    Sets raised_by to the customer's email so Helpdesk's before_validate
+    hooks auto-resolve the Contact and HD Customer from the email.
+    """
+    require_login()
+
+    if not subject or not subject.strip():
+        frappe.throw(_("Ticket subject is required"))
+
+    doc = {
+        "doctype": "HD Ticket",
+        "subject": subject.strip(),
+        "description": description or "",
+        "via_customer_portal": False,
+    }
+
+    if customer_email:
+        doc["raised_by"] = customer_email
+
+    if ticket_type:
+        doc["ticket_type"] = ticket_type
+    if priority:
+        doc["priority"] = priority
+    if agent_group:
+        doc["agent_group"] = agent_group
+    if team_folder:
+        doc["team_folder"] = team_folder
+
+    ticket = frappe.get_doc(doc).insert()
+
+    # Assign agent after creation (uses Frappe's assign_to mechanism)
+    if assignee:
+        from frappe.desk.form.assign_to import add as assign_to
+        assign_to({
+            "doctype": "HD Ticket",
+            "name": ticket.name,
+            "assign_to": [assignee],
+        })
+
+    return {
+        "ticket_id": ticket.name,
+        "status": ticket.status,
+        "subject": ticket.subject
     }
 
 

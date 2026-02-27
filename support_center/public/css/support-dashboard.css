@@ -658,10 +658,21 @@ body {
     color: #db2777;
 }
 
+/* Actions column — wider, centered */
+.customer-table th:last-child,
+.customer-table td:last-child {
+    width: 180px;
+    text-align: center;
+}
+
 /* Table Actions */
 .table-actions {
     display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 0.5rem;
+    flex-wrap: nowrap;
+    white-space: nowrap;
 }
 
 .table-actions button {
@@ -1707,6 +1718,144 @@ hr {
     gap: 0.5rem;
     padding: 1rem 1.5rem;
     border-top: 1px solid var(--border);
+}
+
+/* ============================================
+   Create Ticket Modal
+   ============================================ */
+.ticket-modal-content {
+    max-width: 560px;
+}
+
+.ticket-customer-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    font-size: var(--text-sm);
+}
+
+.ticket-customer-info .customer-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.ticket-customer-info .customer-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.ticket-customer-info .customer-meta strong {
+    color: var(--text);
+    font-weight: 500;
+}
+
+.ticket-customer-info .customer-meta span {
+    color: var(--muted);
+    font-size: var(--text-xs);
+}
+
+#ticket-modal .form-group {
+    margin-bottom: 0.875rem;
+}
+
+#ticket-modal .form-group label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.375rem;
+    color: var(--text);
+    font-size: var(--text-sm);
+}
+
+#ticket-modal .form-group label .required {
+    color: var(--danger);
+}
+
+#ticket-modal .form-group input[type="text"],
+#ticket-modal .form-group textarea,
+#ticket-modal .form-group select {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    font-size: var(--text-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card);
+    color: var(--text);
+    font-family: inherit;
+    transition: var(--transition);
+    box-sizing: border-box;
+}
+
+#ticket-modal .form-group input[type="text"]:focus,
+#ticket-modal .form-group textarea:focus,
+#ticket-modal .form-group select:focus {
+    outline: none;
+    border-color: var(--border-hover);
+    box-shadow: 0 0 0 1px var(--border-hover);
+}
+
+#ticket-modal .form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.form-row-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.ticket-success {
+    text-align: center;
+    padding: 1.5rem;
+}
+
+.ticket-success .success-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 1rem;
+    border-radius: 50%;
+    background: var(--success-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ticket-success .success-icon svg {
+    color: var(--success);
+}
+
+.ticket-success h3 {
+    margin: 0 0 0.5rem;
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--text);
+}
+
+.ticket-success p {
+    margin: 0 0 1rem;
+    color: var(--muted);
+    font-size: var(--text-sm);
+}
+
+.ticket-success a {
+    color: var(--primary);
+    text-decoration: underline;
+    font-weight: 500;
+    font-size: var(--text-sm);
 }
 
 /* ============================================
@@ -3276,21 +3425,30 @@ hr {
     background-color: var(--bg-secondary);
 }
 
+/* Booked-by agent name pill */
+.booked-by-agent {
+    display: inline-block;
+    color: var(--info);
+    font-weight: 600;
+    background: var(--info-soft);
+    padding: 0.0625rem 0.5rem;
+    border-radius: 9999px;
+    font-size: var(--text-xs);
+}
+
 /* ============================================
    Inline Row Actions
    ============================================ */
-.table-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
 .row-actions {
     display: flex;
     gap: 0.375rem;
     opacity: 0;
     transition: opacity 0.15s ease;
     flex-shrink: 0;
+    flex-wrap: nowrap;
+    width: 64px;
+    min-width: 64px;
+    justify-content: flex-end;
 }
 
 .customer-table tbody tr:hover .row-actions {
